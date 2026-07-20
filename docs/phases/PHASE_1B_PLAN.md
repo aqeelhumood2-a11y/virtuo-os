@@ -1,6 +1,25 @@
 # Phase 1B — Authentication & Sessions: Implementation Plan
 
-Status: **awaiting approval — no code written yet.**
+Status: **BLOCKED — conditionally approved, but implementation cannot start.** Verified against the real `virtuo-os` project via the Admin SDK (`adminAuth.listUsers()`): Firebase Authentication returns `auth/configuration-not-found`, meaning it has not been enabled in the Firebase Console yet. Per explicit instruction, implementation stops here — no workaround will be attempted. Once you've clicked "Get started" under Authentication in the Firebase Console and enabled the Email/Password provider, tell me and I'll re-verify and proceed.
+
+## Amendments required at conditional approval (incorporated into this plan; code not yet written)
+
+1. **Sign-up is approved, scope-limited exactly as specified**: creates only the Firebase Auth account (UID, email, verification status per Firebase config) and a valid session. No Firestore user document, company, role, permissions, membership, or onboarding data — all deferred to 1C. `signUpAction` will do nothing beyond `identity-toolkit.signUp()` + `createSessionCookie()`.
+2. **Auth architecture approved as proposed** (session cookies only, httpOnly/Secure/SameSite=Lax, server-side verification only, no client-side auth-state trust, no client-side authorization logic anywhere).
+3. **Security additions required, not yet in the original plan:**
+   - CSRF protection on every auth Server Action.
+   - Basic rate limiting for sign-in, sign-up, and password reset — leaning on Firebase's own native throttling (`TOO_MANY_ATTEMPTS_TRY_LATER`) where available, but the module boundary must be shaped so an application-level limiter can be dropped in later without a redesign.
+   - Never leak whether an email exists (already planned) and never leak raw Firebase/internal error detail — every error surfaced to the user must go through the safe-message mapping, with no fallback path that echoes a provider error string.
+4. **Session security additions:**
+   - Session rotation after authentication (mint a fresh session cookie on sign-in/sign-up rather than reusing anything from a prior state).
+   - Revoke *all* sessions on sign-out (`revokeRefreshTokens`, already planned — now explicit as a hard requirement, not just "defense in depth").
+   - Explicit expired/invalid/revoked/tampered session handling with recovery (clear the dead cookie and redirect to `/login`, never a raw error page).
+5. **Firestore: reconfirmed zero writes, zero collections, zero rule changes, zero profile documents.** Matches what was already planned in §3/§6 — restated here as a hard constraint, not just a default.
+6. **Testing: additional required cases** beyond the original proposal — invalid session cookie, expired session cookie, revoked session, missing cookie, tampered cookie, CSRF failure, rate-limit behavior (mocked). Added to §7 below.
+7. **Firebase Console gate: enforced.** See the BLOCKED status above — this is that exact check, and it failed.
+8. **Dependencies: reconfirmed zero new libraries** — Firebase Authentication (via REST), Firebase Admin SDK, Next.js, and existing project dependencies only. No CSRF library, no rate-limiting library: both will be implemented with what's already available (Web Crypto for CSRF tokens, an in-memory/interface-based limiter for rate limiting — detailed in the revised plan once unblocked).
+
+The remainder of this document (§1–§9 below) is the original proposal; it will be revised in place once the amendments above are threaded through §1 (flow), §2 (file list), §7 (testing), and §9 (risks) — that revision happens after the Console block clears, together with your go-ahead, not before.
 
 Standing rules carried forward from Phase 1A's approval (apply to this phase and every phase after): architecture boundary tests remain part of CI; the client-env/server-env split is not altered; every new dependency needs a documented justification; Core stays completely business-agnostic.
 
