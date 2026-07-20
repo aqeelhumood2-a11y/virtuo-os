@@ -16,4 +16,5 @@ export type Capability =
   | "orders.view"
   | "orders.create"
   | "orders.complete"
-  | "orders.void";
+  | "orders.void"
+  | "audit.view";

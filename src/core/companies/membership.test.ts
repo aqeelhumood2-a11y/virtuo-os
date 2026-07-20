@@ -215,19 +215,27 @@ describe("isLastActiveOwner", () => {
   });
 });
 
-describe("updateMembershipRole", () => {
+// Both functions are now sync and transaction-composable (1G) -- they take
+// an already-open Transaction and call transaction.update() rather than
+// awaiting a Firestore call directly, so tests pass a fake transaction
+// whose update() forwards to the same updateMock used above.
+function fakeTransaction() {
+  return { update: (_ref: unknown, data: unknown) => updateMock(data) };
+}
+
+describe("updateMembershipRoleInTransaction", () => {
   it("updates only the role field on the target membership doc", async () => {
-    const { updateMembershipRole } = await import("./membership");
-    await updateMembershipRole("company-1", "uid-1", "Manager");
+    const { updateMembershipRoleInTransaction } = await import("./membership");
+    updateMembershipRoleInTransaction(fakeTransaction() as never, "company-1", "uid-1", "Manager");
 
     expect(updateMock).toHaveBeenCalledWith({ role: "Manager" });
   });
 });
 
-describe("deactivateMembership", () => {
+describe("deactivateMembershipInTransaction", () => {
   it("sets status to disabled on the target membership doc", async () => {
-    const { deactivateMembership } = await import("./membership");
-    await deactivateMembership("company-1", "uid-1");
+    const { deactivateMembershipInTransaction } = await import("./membership");
+    deactivateMembershipInTransaction(fakeTransaction() as never, "company-1", "uid-1");
 
     expect(updateMock).toHaveBeenCalledWith({ status: "disabled" });
   });

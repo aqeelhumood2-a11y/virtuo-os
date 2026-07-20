@@ -3,6 +3,8 @@ import "server-only";
 import { FieldValue, type DocumentReference, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { writeAuditInTransaction } from "@/core/audit-logs";
+import type { AuditAction } from "@/core/audit-logs";
 import { BranchAccessDeniedError } from "@/core/companies/errors";
 import { hasBranchAccess } from "@/core/companies/membership";
 import type { CompanyMembershipContext } from "@/core/companies/membership";
@@ -72,6 +74,7 @@ export type ApplyStockChangeParams = {
 };
 
 export type StockChangePlan = {
+  companyId: string;
   stockRef: DocumentReference;
   movementRef: DocumentReference;
   branchId: string;
@@ -83,6 +86,14 @@ export type StockChangePlan = {
   itemNameSnapshot: string;
   reason: string;
   performedBy: string;
+};
+
+const AUDIT_ACTION_BY_MOVEMENT_TYPE: Record<MovementType, AuditAction> = {
+  receive: "inventory.stockReceived",
+  waste: "inventory.stockWasted",
+  adjust: "inventory.stockAdjusted",
+  transfer: "inventory.stockTransferred",
+  sale: "inventory.stockSold",
 };
 
 // Read-and-validate phase, split from the write phase below, specifically
@@ -118,6 +129,7 @@ export async function planStockChange(
   assertSufficientStock(currentQuantity, quantityDelta);
 
   return {
+    companyId,
     stockRef,
     movementRef: movementsCollection(companyId).doc(),
     branchId,
@@ -133,7 +145,11 @@ export async function planStockChange(
 }
 
 // Write phase -- call only after every plan() this transaction needs has
-// already been produced, so all reads precede all writes.
+// already been produced, so all reads precede all writes. Also writes the
+// audit log entry for this stock change (1G) -- every caller that reaches
+// this function (this module's own receiveStock/wasteStock/adjustStock/
+// recordStockCount, and order-engine's completeOrder/voidOrder) gets audit
+// logging automatically, with no per-call-site wiring needed.
 export function commitStockChangePlan(transaction: Transaction, plan: StockChangePlan): void {
   const now = FieldValue.serverTimestamp();
 
@@ -158,6 +174,17 @@ export function commitStockChangePlan(transaction: Transaction, plan: StockChang
     reason: plan.reason,
     performedBy: plan.performedBy,
     createdAt: now,
+  });
+
+  writeAuditInTransaction(transaction, {
+    companyId: plan.companyId,
+    actorId: plan.performedBy,
+    action: plan.type === "adjust" && plan.reason === "count" ? "inventory.stockCounted" : AUDIT_ACTION_BY_MOVEMENT_TYPE[plan.type],
+    targetType: "stock",
+    targetId: plan.itemId,
+    branchId: plan.branchId,
+    before: { quantityOnHand: plan.quantityOnHand - plan.quantityDelta },
+    after: { quantityOnHand: plan.quantityOnHand },
   });
 }
 
@@ -338,6 +365,20 @@ export async function transferStock(
       performedBy: context.session.uid,
       transferGroupId,
       createdAt: now,
+    });
+
+    // One entry for the whole transfer -- doesn't route through
+    // commitStockChangePlan() (this function has its own bespoke
+    // two-branch transaction), so it needs its own audit call.
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: context.session.uid,
+      action: "inventory.stockTransferred",
+      targetType: "stock",
+      targetId: itemId,
+      branchId: fromBranchId,
+      before: { fromQuantity, toQuantity },
+      after: { fromQuantity: fromQuantity - quantity, toQuantity: toQuantity + quantity },
     });
   });
 }

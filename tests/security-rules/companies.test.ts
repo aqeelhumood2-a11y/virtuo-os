@@ -89,13 +89,16 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: users/companies/branche
       await assertSucceeds(getDoc(doc(ownerDb, "companies", "company-1", "memberships", "owner-1")));
     });
 
-    it("allows the Owner to update name/status", async () => {
+    // 1D allowed a direct, capability-gated client write here for
+    // rename/suspend; 1G removed it so every mutation has a server-side
+    // interception point to audit-log from (updateCompanyAction/
+    // suspendCompanyAction now own this, Admin-SDK-only). These three
+    // tests assert the write is denied regardless of role.
+    it("denies the Owner from updating name/status directly (1G: routed through a server action instead)", async () => {
       await seedCompanyWithOwner("company-1", "owner-1");
       const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
-      await assertSucceeds(updateDoc(doc(ownerDb, "companies", "company-1"), { name: "New Name" }));
-      await assertSucceeds(
-        updateDoc(doc(ownerDb, "companies", "company-1"), { status: "suspended" }),
-      );
+      await assertFails(updateDoc(doc(ownerDb, "companies", "company-1"), { name: "New Name" }));
+      await assertFails(updateDoc(doc(ownerDb, "companies", "company-1"), { status: "suspended" }));
     });
 
     it("denies a non-owner, non-manager member from updating the company at all", async () => {
@@ -113,7 +116,7 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: users/companies/branche
       await assertFails(updateDoc(doc(employeeDb, "companies", "company-1"), { status: "suspended" }));
     });
 
-    it("allows a Manager to rename the company but not suspend it (1D capability split)", async () => {
+    it("denies a Manager from updating name/status directly (1G)", async () => {
       await seedCompanyWithOwner("company-1", "owner-1");
       await testEnv.withSecurityRulesDisabled(async (context) => {
         await setDoc(doc(context.firestore(), "companies", "company-1", "memberships", "manager-1"), {
@@ -124,7 +127,7 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: users/companies/branche
         });
       });
       const managerDb = testEnv.authenticatedContext("manager-1").firestore();
-      await assertSucceeds(updateDoc(doc(managerDb, "companies", "company-1"), { name: "Renamed by Manager" }));
+      await assertFails(updateDoc(doc(managerDb, "companies", "company-1"), { name: "Renamed by Manager" }));
       await assertFails(updateDoc(doc(managerDb, "companies", "company-1"), { status: "suspended" }));
     });
 

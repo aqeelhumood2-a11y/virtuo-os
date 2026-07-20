@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { writeAuditInTransaction } from "@/core/audit-logs";
 
 import { DEFAULT_BRANCH_NAME } from "./constants";
 import type { OnboardingResult } from "./types";
@@ -87,6 +88,15 @@ export async function runOnboardingTransaction(
       branchIds: [],
       status: "active",
       joinedAt: now,
+    });
+
+    writeAuditInTransaction(transaction, {
+      companyId: companyRef.id,
+      actorId: uid,
+      action: "company.onboarded",
+      targetType: "company",
+      targetId: companyRef.id,
+      after: { name: companyName, status: "active" },
     });
   });
 

@@ -4,11 +4,19 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { adminDb } from "@/lib/firebase/admin";
+import { writeAuditInTransaction } from "@/core/audit-logs";
+import { createNotificationInTransaction } from "@/core/notifications";
 import { CSRF_COOKIE_NAME } from "@/core/auth/constants";
 import { csrfTokensMatch } from "@/core/auth/csrf";
 import { outranks, requireCapability } from "@/core/roles-permissions";
 
-import { deactivateMembership, getMembership, isLastActiveOwner, updateMembershipRole } from "./membership";
+import {
+  deactivateMembershipInTransaction,
+  getMembership,
+  isLastActiveOwner,
+  updateMembershipRoleInTransaction,
+} from "./membership";
 import type { MemberActionFormState } from "./types";
 
 const updateRoleSchema = z.object({
@@ -52,7 +60,7 @@ export async function updateMemberRoleAction(
   }
   const { companyId, targetUid, role } = parsed.data;
 
-  await requireCapability(companyId, "membership.updateRole");
+  const { session } = await requireCapability(companyId, "membership.updateRole");
 
   const targetMembership = await getMembership(companyId, targetUid);
   if (!targetMembership) {
@@ -63,7 +71,30 @@ export async function updateMemberRoleAction(
     return { error: "This is the only active Owner -- assign another Owner first." };
   }
 
-  await updateMembershipRole(companyId, targetUid, role);
+  // Membership update, its audit log entry, and the affected member's
+  // notification all commit atomically in one transaction (1G) -- never a
+  // mutation without a matching log entry, or a log entry the mutation
+  // didn't actually happen with.
+  await adminDb.runTransaction(async (transaction) => {
+    updateMembershipRoleInTransaction(transaction, companyId, targetUid, role);
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: session.uid,
+      action: "membership.roleUpdated",
+      targetType: "membership",
+      targetId: targetUid,
+      before: { role: targetMembership.role },
+      after: { role },
+    });
+
+    createNotificationInTransaction(transaction, targetUid, {
+      title: "Your role was updated",
+      body: `Your role is now ${role}.`,
+      relatedEntity: { type: "membership", id: targetUid },
+    });
+  });
+
   revalidatePath("/account");
   return { success: "Role updated." };
 }
@@ -85,7 +116,7 @@ export async function deactivateMemberAction(
   }
   const { companyId, targetUid } = parsed.data;
 
-  const { membership: actorMembership } = await requireCapability(companyId, "membership.deactivate");
+  const { session, membership: actorMembership } = await requireCapability(companyId, "membership.deactivate");
 
   const targetMembership = await getMembership(companyId, targetUid);
   if (!targetMembership) {
@@ -103,7 +134,26 @@ export async function deactivateMemberAction(
     return { error: "Cannot deactivate the only active Owner." };
   }
 
-  await deactivateMembership(companyId, targetUid);
+  await adminDb.runTransaction(async (transaction) => {
+    deactivateMembershipInTransaction(transaction, companyId, targetUid);
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: session.uid,
+      action: "membership.deactivated",
+      targetType: "membership",
+      targetId: targetUid,
+      before: { status: targetMembership.status },
+      after: { status: "disabled" },
+    });
+
+    createNotificationInTransaction(transaction, targetUid, {
+      title: "Your access was removed",
+      body: "You no longer have access to this company.",
+      relatedEntity: { type: "membership", id: targetUid },
+    });
+  });
+
   revalidatePath("/account");
   return { success: "Member deactivated." };
 }

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import type { Transaction } from "firebase-admin/firestore";
 import { redirect } from "next/navigation";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -128,28 +129,26 @@ export async function isLastActiveOwner(companyId: string, uid: string): Promise
   return ownerCount <= 1;
 }
 
+function membershipDocRef(companyId: string, uid: string) {
+  return adminDb.collection("companies").doc(companyId).collection("memberships").doc(uid);
+}
+
 // Both of these are Admin-SDK-only mutations -- firestore.rules denies
 // direct client writes to memberships unconditionally (see 1C), so the
 // capability check in core/companies/members-actions.ts is the real
-// authorization boundary, not a Security Rule.
-export async function updateMembershipRole(
+// authorization boundary, not a Security Rule. Transaction-composable
+// (1G) so members-actions.ts can commit the membership change, its audit
+// log entry, and a notification to the affected member all atomically in
+// one transaction -- same plan/commit reasoning as inventory-engine (1F).
+export function updateMembershipRoleInTransaction(
+  transaction: Transaction,
   companyId: string,
   uid: string,
   role: MembershipRole,
-): Promise<void> {
-  await adminDb
-    .collection("companies")
-    .doc(companyId)
-    .collection("memberships")
-    .doc(uid)
-    .update({ role });
+): void {
+  transaction.update(membershipDocRef(companyId, uid), { role });
 }
 
-export async function deactivateMembership(companyId: string, uid: string): Promise<void> {
-  await adminDb
-    .collection("companies")
-    .doc(companyId)
-    .collection("memberships")
-    .doc(uid)
-    .update({ status: "disabled" });
+export function deactivateMembershipInTransaction(transaction: Transaction, companyId: string, uid: string): void {
+  transaction.update(membershipDocRef(companyId, uid), { status: "disabled" });
 }

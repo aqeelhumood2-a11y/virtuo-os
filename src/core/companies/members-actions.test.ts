@@ -4,8 +4,10 @@ const requireCapabilityMock = vi.fn();
 const outranksMock = vi.fn();
 const getMembershipMock = vi.fn();
 const isLastActiveOwnerMock = vi.fn();
-const updateMembershipRoleMock = vi.fn();
-const deactivateMembershipMock = vi.fn();
+const updateMembershipRoleInTransactionMock = vi.fn();
+const deactivateMembershipInTransactionMock = vi.fn();
+const writeAuditInTransactionMock = vi.fn();
+const createNotificationInTransactionMock = vi.fn();
 const revalidatePathMock = vi.fn();
 
 let csrfCookieValue: string | undefined;
@@ -29,11 +31,29 @@ vi.mock("@/core/roles-permissions", () => ({
   outranks: (...args: unknown[]) => outranksMock(...args),
 }));
 
+vi.mock("@/core/audit-logs", () => ({
+  writeAuditInTransaction: (...args: unknown[]) => writeAuditInTransactionMock(...args),
+}));
+
+vi.mock("@/core/notifications", () => ({
+  createNotificationInTransaction: (...args: unknown[]) => createNotificationInTransactionMock(...args),
+}));
+
 vi.mock("./membership", () => ({
   getMembership: (...args: unknown[]) => getMembershipMock(...args),
   isLastActiveOwner: (...args: unknown[]) => isLastActiveOwnerMock(...args),
-  updateMembershipRole: (...args: unknown[]) => updateMembershipRoleMock(...args),
-  deactivateMembership: (...args: unknown[]) => deactivateMembershipMock(...args),
+  updateMembershipRoleInTransaction: (...args: unknown[]) => updateMembershipRoleInTransactionMock(...args),
+  deactivateMembershipInTransaction: (...args: unknown[]) => deactivateMembershipInTransactionMock(...args),
+}));
+
+// The mutation, its audit log entry, and the affected member's notification
+// all commit inside one adminDb.runTransaction() call (1G) -- a fake
+// transaction object is enough here since the transaction-composable
+// primitives above are all mocked out too.
+vi.mock("@/lib/firebase/admin", () => ({
+  adminDb: {
+    runTransaction: async (fn: (t: unknown) => Promise<void> | void) => fn({}),
+  },
 }));
 
 import { deactivateMemberAction, updateMemberRoleAction } from "./members-actions";
@@ -83,14 +103,14 @@ describe("updateMemberRoleAction", () => {
     getMembershipMock.mockResolvedValue(null);
     const result = await updateMemberRoleAction({}, validForm());
     expect(result.error).toMatch(/could not be found/i);
-    expect(updateMembershipRoleMock).not.toHaveBeenCalled();
+    expect(updateMembershipRoleInTransactionMock).not.toHaveBeenCalled();
   });
 
   it("rejects demoting the only active Owner", async () => {
     isLastActiveOwnerMock.mockResolvedValue(true);
     const result = await updateMemberRoleAction({}, validForm());
     expect(result.error).toMatch(/only active owner/i);
-    expect(updateMembershipRoleMock).not.toHaveBeenCalled();
+    expect(updateMembershipRoleInTransactionMock).not.toHaveBeenCalled();
   });
 
   it("allows reassigning Owner to Owner even if they are the only Owner", async () => {
@@ -100,12 +120,39 @@ describe("updateMemberRoleAction", () => {
       formData({ companyId: "company-1", targetUid: "target-1", role: "Owner", csrfToken: "valid-csrf-token" }),
     );
     expect(result.success).toBeDefined();
-    expect(updateMembershipRoleMock).toHaveBeenCalledWith("company-1", "target-1", "Owner");
+    expect(updateMembershipRoleInTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "company-1",
+      "target-1",
+      "Owner",
+    );
   });
 
-  it("updates the role and revalidates /account on success", async () => {
+  it("updates the role, writes an audit log entry, notifies the target, and revalidates /account on success", async () => {
     const result = await updateMemberRoleAction({}, validForm());
-    expect(updateMembershipRoleMock).toHaveBeenCalledWith("company-1", "target-1", "Manager");
+    expect(updateMembershipRoleInTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "company-1",
+      "target-1",
+      "Manager",
+    );
+    expect(writeAuditInTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        companyId: "company-1",
+        actorId: "owner-1",
+        action: "membership.roleUpdated",
+        targetType: "membership",
+        targetId: "target-1",
+        before: { role: "Employee" },
+        after: { role: "Manager" },
+      }),
+    );
+    expect(createNotificationInTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "target-1",
+      expect.objectContaining({ relatedEntity: { type: "membership", id: "target-1" } }),
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith("/account");
     expect(result.success).toBeDefined();
   });
@@ -130,7 +177,7 @@ describe("deactivateMemberAction", () => {
     getMembershipMock.mockResolvedValue(null);
     const result = await deactivateMemberAction({}, validForm());
     expect(result.error).toMatch(/could not be found/i);
-    expect(deactivateMembershipMock).not.toHaveBeenCalled();
+    expect(deactivateMembershipInTransactionMock).not.toHaveBeenCalled();
   });
 
   it("rejects when a non-Owner actor targets an equal-or-higher-ranked member", async () => {
@@ -143,26 +190,41 @@ describe("deactivateMemberAction", () => {
 
     const result = await deactivateMemberAction({}, validForm());
     expect(result.error).toMatch(/don't have permission/i);
-    expect(deactivateMembershipMock).not.toHaveBeenCalled();
+    expect(deactivateMembershipInTransactionMock).not.toHaveBeenCalled();
   });
 
   it("allows Owner to deactivate anyone regardless of outranks()", async () => {
     outranksMock.mockReturnValue(false);
     const result = await deactivateMemberAction({}, validForm());
     expect(result.success).toBeDefined();
-    expect(deactivateMembershipMock).toHaveBeenCalledWith("company-1", "target-1");
+    expect(deactivateMembershipInTransactionMock).toHaveBeenCalledWith(expect.anything(), "company-1", "target-1");
   });
 
   it("rejects deactivating the only active Owner", async () => {
     isLastActiveOwnerMock.mockResolvedValue(true);
     const result = await deactivateMemberAction({}, validForm());
     expect(result.error).toMatch(/only active owner/i);
-    expect(deactivateMembershipMock).not.toHaveBeenCalled();
+    expect(deactivateMembershipInTransactionMock).not.toHaveBeenCalled();
   });
 
-  it("deactivates the member and revalidates /account on success", async () => {
+  it("deactivates the member, writes an audit log entry, notifies the target, and revalidates /account on success", async () => {
     const result = await deactivateMemberAction({}, validForm());
-    expect(deactivateMembershipMock).toHaveBeenCalledWith("company-1", "target-1");
+    expect(deactivateMembershipInTransactionMock).toHaveBeenCalledWith(expect.anything(), "company-1", "target-1");
+    expect(writeAuditInTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        companyId: "company-1",
+        actorId: "owner-1",
+        action: "membership.deactivated",
+        targetType: "membership",
+        targetId: "target-1",
+      }),
+    );
+    expect(createNotificationInTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "target-1",
+      expect.objectContaining({ relatedEntity: { type: "membership", id: "target-1" } }),
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith("/account");
     expect(result.success).toBeDefined();
   });

@@ -1,7 +1,7 @@
 // Core platform public barrel. Auth (1B), the Multi-Tenant Organization
-// Model (1C), Roles & Permissions (1D), the Inventory Engine (1E), and the
-// Order Engine (1F) are implemented so far. Audit Logs and Notifications
-// remain reserved for later phases.
+// Model (1C), Roles & Permissions (1D), the Inventory Engine (1E), the
+// Order Engine (1F), and Audit Logs & Notifications (1G) are implemented
+// so far.
 export {
   signUpAction,
   signInAction,
@@ -11,7 +11,20 @@ export {
 export { getSession, requireSession } from "./auth/session";
 export type { AuthFormState, AuthSession } from "./auth/types";
 
-export { createCompanyAction } from "./companies/actions";
+export { listAuditLogs, writeAuditInTransaction } from "./audit-logs";
+export type { AuditAction, AuditLogEntry, AuditLogParams, AuditTargetType } from "./audit-logs";
+
+export {
+  createNotification,
+  createNotificationInTransaction,
+  listNotifications,
+  markAllAsRead,
+  markAsRead,
+} from "./notifications";
+export type { CreateNotificationInput, Notification, NotificationChannel, RelatedEntity } from "./notifications";
+
+export { createCompanyAction, suspendCompanyAction, updateCompanyAction } from "./companies/actions";
+export { setCompanyStatus, updateCompanyName } from "./companies/company";
 export { BranchAccessDeniedError } from "./companies/errors";
 export { deactivateMemberAction, updateMemberRoleAction } from "./companies/members-actions";
 export { AlreadyOnboardedError, runOnboardingTransaction } from "./companies/onboarding";
@@ -27,6 +40,7 @@ export { getMyCompanySummary } from "./companies/queries";
 export type {
   Branch,
   Company,
+  CompanyActionFormState,
   MemberActionFormState,
   Membership,
   MembershipRole,

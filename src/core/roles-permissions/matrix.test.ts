@@ -19,9 +19,10 @@ describe("ROLE_CAPABILITIES", () => {
         "orders.create",
         "orders.complete",
         "orders.void",
+        "audit.view",
       ]),
     );
-    expect(ROLE_CAPABILITIES.Owner).toHaveLength(13);
+    expect(ROLE_CAPABILITIES.Owner).toHaveLength(14);
   });
 
   it("grants Manager everything except membership.updateRole and company.suspend", () => {
@@ -40,6 +41,7 @@ describe("ROLE_CAPABILITIES", () => {
         "orders.create",
         "orders.complete",
         "orders.void",
+        "audit.view",
       ]),
     );
   });
@@ -60,6 +62,8 @@ describe("ROLE_CAPABILITIES", () => {
     expect(ROLE_CAPABILITIES.Employee).not.toContain("inventory.write");
     expect(ROLE_CAPABILITIES.Supervisor).not.toContain("orders.void");
     expect(ROLE_CAPABILITIES.Employee).not.toContain("orders.void");
+    expect(ROLE_CAPABILITIES.Supervisor).not.toContain("audit.view");
+    expect(ROLE_CAPABILITIES.Employee).not.toContain("audit.view");
   });
 });
 

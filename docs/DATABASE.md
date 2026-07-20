@@ -71,14 +71,18 @@ companies/{companyId}/orders/{orderId}/lines/{lineId}    # subcollection: always
   branchId (denormalized from the parent order, same reason inventoryMovements carries its own),
   itemId, itemNameSnapshot, quantity, unitPrice, lineTotal
 
-# --- Cross-cutting Core services ---
+# --- Cross-cutting Core services --- implemented Phase 1G,
+# see docs/phases/PHASE_1G_PLAN.md
 companies/{companyId}/auditLogs/{logId}
-  actorId, action, targetType, targetId, before?, after?, createdAt
-  # append-only, written by core/audit-logs — every mutation path calls this, no exceptions
+  actorId, action, targetType, targetId, branchId?, before?, after?, createdAt
+  # append-only, written by core/audit-logs's writeAuditInTransaction() — every
+  # mutation path from 1C-1F calls this inside the same transaction as the
+  # mutation it records, no exceptions and no separate best-effort write
 
 users/{userId}/notifications/{notificationId}
   title, body, channel, readAt?, createdAt, relatedEntity?
   # per-user, not per-company — a user sees their own notifications across companies
+  # only channel implemented so far is "in-app" (core/notifications/channels/in-app.ts)
 ```
 
 ## 3. App-owned collections (Phase 4+, namespaced so ownership is unambiguous)
@@ -112,6 +116,10 @@ Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are 
 
 ## 6. Security Rules strategy
 
-**Implemented (Phase 1C + 1D + 1E + 1F)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`/`inventoryItems`/`stock`/`inventoryMovements`/`orders`/`orders/lines`: shared helpers (`isActiveMember`, `hasCapability`, `hasBranchAccess`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. The `companies` update rule checks `hasCapability(companyId, 'company.update' | 'company.suspend')`, a hand-maintained rules-side mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` (rules can't import TypeScript, so the two are kept in sync manually — see the comment in `firestore.rules`). `stock`/`inventoryMovements`/`orders`/`orders/lines` reads additionally require the caller's `branchIds` to include the document's `branchId` (empty `branchIds` = all branches) — order lines carry their own denormalized `branchId` so this never needs a parent-order lookup. `isSuperAdmin()` grants a cross-tenant read bypass on all of the above for the global `superAdmin` custom claim; it grants no write access anywhere. Every client write to these nine collections is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` (and, for branch-scoped collections, `hasBranchAccess()`) before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4, `docs/phases/PHASE_1D_PLAN.md` §6, `docs/phases/PHASE_1E_PLAN.md` §7, and `docs/phases/PHASE_1F_PLAN.md` §7.
+**Implemented (Phase 1C + 1D + 1E + 1F + 1G)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`/`inventoryItems`/`stock`/`inventoryMovements`/`orders`/`orders/lines`/`auditLogs`/`users/{uid}/notifications`: shared helpers (`isActiveMember`, `hasCapability`, `hasBranchAccess`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. `stock`/`inventoryMovements`/`orders`/`orders/lines` reads additionally require the caller's `branchIds` to include the document's `branchId` (empty `branchIds` = all branches) — order lines carry their own denormalized `branchId` so this never needs a parent-order lookup. `isSuperAdmin()` grants a cross-tenant read bypass on every company-scoped collection above (not `notifications`, which is per-user, not per-company) for the global `superAdmin` custom claim; it grants no write access anywhere. Every client write to every collection above is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` (and, for branch-scoped collections, `hasBranchAccess()`) before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4, `docs/phases/PHASE_1D_PLAN.md` §6, `docs/phases/PHASE_1E_PLAN.md` §7, `docs/phases/PHASE_1F_PLAN.md` §7, and `docs/phases/PHASE_1G_PLAN.md` §6.
+
+**Changed in 1G:** the `companies` update rule that 1D added — `hasCapability(companyId, 'company.update' | 'company.suspend')`, gating a direct, capability-checked client write — is now `allow update: if false`. A direct client write has no server-side interception point to write an audit log entry from, and 1G's "every mutation from 1C–1F is audited, no exceptions" requirement doesn't hold with an un-auditable path left standing. Company rename/suspend now go through `updateCompanyAction`/`suspendCompanyAction` (Admin SDK + `writeAuditInTransaction`, in the same transaction as the update), same as every other mutation in Core. The rules-side `roleCapabilities()` mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` now only needs to model `audit.view` (Owner/Manager), since every other capability's mutation is Admin-SDK-only and has no rules-side capability check left to mirror.
+
+`auditLogs` read is gated by `audit.view` (Owner/Manager, plus the `superAdmin` bypass); write is `if false` unconditionally — the only writer is `core/audit-logs`'s `writeAuditInTransaction()`, called inside the same transaction as the mutation it records, never as a standalone write. `users/{uid}/notifications/{notificationId}` read is self-only (`isSelf(uid)`, no `superAdmin` bypass — notifications are a personal inbox, not tenant data); write is `if false` — even marking one's own notification read goes through `core/notifications`'s `markAsRead()`/`markAllAsRead()` (Admin SDK).
 
 Note this **supersedes** the originally-sketched aspirational shape (a generic `hasCapability(companyId, '<collection>.write')` direct-client-write rule per collection) — `ARCHITECTURE.md` §6 is explicit that inventory adjustments and order status changes go through server-side logic, not rule-gated direct writes, and the multi-document atomicity these transactions need (an order's status change plus every line's stock deduction, in one commit) couldn't be expressed safely as a rules-only invariant regardless.

@@ -41,3 +41,8 @@ export type MemberActionFormState = {
   error?: string;
   success?: string;
 };
+
+export type CompanyActionFormState = {
+  error?: string;
+  success?: string;
+};

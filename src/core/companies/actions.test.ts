@@ -8,6 +8,9 @@ const checkRateLimitMock = vi.fn((action: string, identifier: string) => {
 });
 const requireSessionMock = vi.fn();
 const runOnboardingTransactionMock = vi.fn();
+const updateCompanyNameMock = vi.fn();
+const setCompanyStatusMock = vi.fn();
+const revalidatePathMock = vi.fn();
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
@@ -23,6 +26,15 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => redirectMock(url),
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
+}));
+
+vi.mock("./company", () => ({
+  updateCompanyName: (...args: unknown[]) => updateCompanyNameMock(...args),
+  setCompanyStatus: (...args: unknown[]) => setCompanyStatusMock(...args),
 }));
 
 vi.mock("@/core/auth/csrf", () => ({
@@ -45,7 +57,7 @@ vi.mock("./onboarding", async () => {
   };
 });
 
-import { createCompanyAction } from "./actions";
+import { createCompanyAction, suspendCompanyAction, updateCompanyAction } from "./actions";
 import { AlreadyOnboardedError } from "./onboarding";
 
 function formData(fields: Record<string, string>): FormData {
@@ -128,5 +140,82 @@ describe("createCompanyAction", () => {
 
     expect(result.error).toBe("Something went wrong. Please try again.");
     expect(result.error).not.toContain("internal Firestore detail");
+  });
+});
+
+describe("updateCompanyAction", () => {
+  const validForm = () => formData({ companyId: "company-1", name: "New Name", csrfToken: "valid-csrf-token" });
+
+  it("rejects when the CSRF token does not match", async () => {
+    csrfTokensMatchMock.mockReturnValue(false);
+    const result = await updateCompanyAction({}, validForm());
+    expect(result.error).toMatch(/session has expired/i);
+    expect(updateCompanyNameMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty name before calling updateCompanyName", async () => {
+    const result = await updateCompanyAction(
+      {},
+      formData({ companyId: "company-1", name: "", csrfToken: "valid-csrf-token" }),
+    );
+    expect(result.error).toMatch(/company name/i);
+    expect(updateCompanyNameMock).not.toHaveBeenCalled();
+  });
+
+  it("calls updateCompanyName with the validated companyId/name, then revalidates /account", async () => {
+    const result = await updateCompanyAction({}, validForm());
+
+    expect(updateCompanyNameMock).toHaveBeenCalledWith("company-1", "New Name");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/account");
+    expect(result.success).toBeDefined();
+  });
+
+  it("maps an unexpected error (e.g. a capability rejection) to a generic message", async () => {
+    updateCompanyNameMock.mockRejectedValue(new Error("Forbidden"));
+    const result = await updateCompanyAction({}, validForm());
+
+    expect(result.error).toBe("Something went wrong. Please try again.");
+    expect(result.error).not.toContain("Forbidden");
+  });
+});
+
+describe("suspendCompanyAction", () => {
+  const validForm = (status: string) =>
+    formData({ companyId: "company-1", status, csrfToken: "valid-csrf-token" });
+
+  it("rejects when the CSRF token does not match", async () => {
+    csrfTokensMatchMock.mockReturnValue(false);
+    const result = await suspendCompanyAction({}, validForm("suspended"));
+    expect(result.error).toMatch(/session has expired/i);
+    expect(setCompanyStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid status value before calling setCompanyStatus", async () => {
+    const result = await suspendCompanyAction({}, validForm("archived"));
+    expect(result.error).toBe("Invalid request.");
+    expect(setCompanyStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("suspends the company and reports a suspended-specific success message", async () => {
+    const result = await suspendCompanyAction({}, validForm("suspended"));
+
+    expect(setCompanyStatusMock).toHaveBeenCalledWith("company-1", "suspended");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/account");
+    expect(result.success).toMatch(/suspended/i);
+  });
+
+  it("reactivates the company and reports a reactivated-specific success message", async () => {
+    const result = await suspendCompanyAction({}, validForm("active"));
+
+    expect(setCompanyStatusMock).toHaveBeenCalledWith("company-1", "active");
+    expect(result.success).toMatch(/reactivated/i);
+  });
+
+  it("maps an unexpected error (e.g. a capability rejection) to a generic message", async () => {
+    setCompanyStatusMock.mockRejectedValue(new Error("Forbidden"));
+    const result = await suspendCompanyAction({}, validForm("suspended"));
+
+    expect(result.error).toBe("Something went wrong. Please try again.");
+    expect(result.error).not.toContain("Forbidden");
   });
 });

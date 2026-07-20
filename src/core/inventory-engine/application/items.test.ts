@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireCapabilityMock = vi.fn();
+const writeAuditInTransactionMock = vi.fn();
 const setMock = vi.fn();
 const updateMock = vi.fn();
 const getMock = vi.fn();
@@ -8,6 +9,13 @@ const collectionGetMock = vi.fn();
 
 vi.mock("@/core/roles-permissions", () => ({
   requireCapability: (...args: unknown[]) => requireCapabilityMock(...args),
+}));
+
+// Audit logging (1G) is exercised for real in the emulator tests; here it's
+// mocked out so it doesn't need its own auditLogs-collection entry in the
+// fake adminDb below, which only models the inventoryItems collection.
+vi.mock("@/core/audit-logs", () => ({
+  writeAuditInTransaction: (...args: unknown[]) => writeAuditInTransactionMock(...args),
 }));
 
 vi.mock("@/lib/firebase/admin", () => ({
@@ -25,6 +33,17 @@ vi.mock("@/lib/firebase/admin", () => ({
         }),
       }),
     }),
+    // createItem/updateItem/deactivateItem all wrap their write + audit log
+    // entry in one transaction (1G) -- the fake transaction just forwards
+    // get/set/update to the same ref mocks used outside a transaction.
+    runTransaction: async (fn: (t: unknown) => Promise<void> | void) => {
+      const fakeTransaction = {
+        get: async (ref: { get: () => unknown }) => ref.get(),
+        set: (ref: { set: (...args: unknown[]) => void }, data: unknown) => ref.set(data),
+        update: (ref: { update: (data: unknown) => void }, data: unknown) => ref.update(data),
+      };
+      return fn(fakeTransaction);
+    },
   },
 }));
 
@@ -34,6 +53,7 @@ beforeEach(() => {
     session: { uid: "owner-1", email: null, superAdmin: false },
     membership: { uid: "owner-1", role: "Owner", branchIds: [], status: "active" },
   });
+  getMock.mockResolvedValue({ exists: true, data: () => ({ name: "Old Name" }) });
 });
 
 afterEach(() => {

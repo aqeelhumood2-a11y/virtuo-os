@@ -14,6 +14,7 @@ const ALL_CAPABILITIES: Capability[] = [
   "orders.create",
   "orders.complete",
   "orders.void",
+  "audit.view",
 ];
 
 const VIEW_ONLY: Capability[] = [
@@ -32,9 +33,11 @@ const VIEW_ONLY: Capability[] = [
 const FRONTLINE: Capability[] = [...VIEW_ONLY, "orders.create", "orders.complete"];
 
 // The single source of truth for "who can do what" (ARCHITECTURE.md §4/§6).
-// firestore.rules mirrors the two capabilities it needs to check directly
-// (company.update/company.suspend) by hand, since rules can't import this
-// file -- see the comment there for how the two are kept in sync.
+// firestore.rules mirrors the one capability it needs to check directly
+// (audit.view) by hand, since rules can't import this file -- every other
+// mutation is Admin-SDK-only, including companies as of 1G, so no other
+// capability needs a rules-side equivalent. See the comment there for how
+// the mirror is kept in sync.
 export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   Owner: ALL_CAPABILITIES,
   // Everything except assigning roles and suspending the company itself --

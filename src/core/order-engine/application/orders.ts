@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { writeAuditInTransaction } from "@/core/audit-logs";
 import { BranchAccessDeniedError } from "@/core/companies/errors";
 import { hasBranchAccess } from "@/core/companies/membership";
 import type { CompanyMembershipContext } from "@/core/companies/membership";
@@ -108,6 +109,16 @@ export async function createOrder(companyId: string, input: CreateOrderInput): P
         lineTotal: lineTotals[index],
       });
     });
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: session.uid,
+      action: "order.created",
+      targetType: "order",
+      targetId: orderRef.id,
+      branchId: input.branchId,
+      after: { status: "pending", total: totals.total },
+    });
   });
 
   return {
@@ -125,7 +136,7 @@ export async function createOrder(companyId: string, input: CreateOrderInput): P
 // (adding items to a still-open order before it's completed).
 export async function addOrderLine(companyId: string, orderId: string, input: OrderLineInput): Promise<void> {
   assertValidLineInput(input);
-  const { order } = await requireOrderAccess(companyId, orderId, "orders.create");
+  const { context, order } = await requireOrderAccess(companyId, orderId, "orders.create");
   if (order.status !== "pending") throw new OrderNotEditableError();
 
   const orderRef = orderDoc(companyId, orderId);
@@ -156,6 +167,17 @@ export async function addOrderLine(companyId: string, orderId: string, input: Or
     });
 
     transaction.update(orderRef, { totals, updatedAt: FieldValue.serverTimestamp() });
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: context.session.uid,
+      action: "order.lineAdded",
+      targetType: "order",
+      targetId: orderId,
+      branchId: currentOrder.branchId,
+      before: { total: currentOrder.totals.total },
+      after: { total: totals.total },
+    });
   });
 }
 
@@ -205,6 +227,19 @@ export async function completeOrder(companyId: string, orderId: string): Promise
     }
 
     transaction.update(orderRef, { status: "completed", updatedAt: FieldValue.serverTimestamp() });
+
+    // In addition to the per-line stock audit entries commitStockChangePlan()
+    // already wrote above, one entry for the order's own status change.
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: context.session.uid,
+      action: "order.completed",
+      targetType: "order",
+      targetId: orderId,
+      branchId: currentOrder.branchId,
+      before: { status: currentOrder.status },
+      after: { status: "completed" },
+    });
   });
 }
 
@@ -250,6 +285,17 @@ export async function voidOrder(companyId: string, orderId: string): Promise<voi
     }
 
     transaction.update(orderRef, { status: "voided", updatedAt: FieldValue.serverTimestamp() });
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: context.session.uid,
+      action: "order.voided",
+      targetType: "order",
+      targetId: orderId,
+      branchId: currentOrder.branchId,
+      before: { status: currentOrder.status },
+      after: { status: "voided" },
+    });
   });
 }
 

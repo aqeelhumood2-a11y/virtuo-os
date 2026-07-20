@@ -4,6 +4,7 @@ const requireCapabilityMock = vi.fn();
 const hasBranchAccessMock = vi.fn();
 const planStockChangeMock = vi.fn();
 const commitStockChangePlanMock = vi.fn();
+const writeAuditInTransactionMock = vi.fn();
 
 const orderGetMock = vi.fn();
 const orderSetMock = vi.fn();
@@ -23,6 +24,13 @@ vi.mock("@/core/companies/membership", () => ({
 vi.mock("@/core/inventory-engine", () => ({
   planStockChange: (...args: unknown[]) => planStockChangeMock(...args),
   commitStockChangePlan: (...args: unknown[]) => commitStockChangePlanMock(...args),
+}));
+
+// Audit logging (1G) is exercised for real in the emulator tests; here it's
+// mocked out so it doesn't need its own auditLogs-collection entry in the
+// fake adminDb below, which only models the orders/lines collections.
+vi.mock("@/core/audit-logs", () => ({
+  writeAuditInTransaction: (...args: unknown[]) => writeAuditInTransactionMock(...args),
 }));
 
 // Same fake-transaction shape as inventory-engine's stock.test.ts: each

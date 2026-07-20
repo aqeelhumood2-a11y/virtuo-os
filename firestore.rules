@@ -66,17 +66,14 @@ service cloud.firestore {
 
     // Hand-maintained mirror of core/roles-permissions/matrix.ts's
     // ROLE_CAPABILITIES -- rules can't import TypeScript, so this list must
-    // be kept in sync by hand whenever the matrix changes. Only the two
-    // capabilities this file actually needs to check are modeled here
-    // (company.update, company.suspend); memberships/branches writes stay
-    // Admin-SDK-only (allow write: if false below) so their capabilities
-    // never need a rules-side equivalent.
+    // be kept in sync by hand whenever the matrix changes. Only the one
+    // capability this file actually needs to check is modeled here
+    // (audit.view); every other collection's writes are Admin-SDK-only
+    // (allow write: if false below), including companies as of 1G (see
+    // that match block), so their capabilities never need a rules-side
+    // equivalent.
     function roleCapabilities(role) {
-      return role == 'Owner'
-        ? ['company.update', 'company.suspend']
-        : role == 'Manager'
-          ? ['company.update']
-          : [];
+      return (role == 'Owner' || role == 'Manager') ? ['audit.view'] : [];
     }
 
     function hasCapability(companyId, capability) {
@@ -95,6 +92,17 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isSelf(uid);
       allow write: if false;
+
+      // --- Notifications (1G) ---------------------------------------------
+      // Per-user, not per-company -- a user sees their own notifications
+      // across every company they belong to. Self-only read, same as the
+      // parent profile document; marking as read goes through
+      // core/notifications's markAsRead()/markAllAsRead() (Admin SDK), so
+      // writes stay denied here too.
+      match /notifications/{notificationId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
     }
 
     match /companies/{companyId} {
@@ -112,19 +120,14 @@ service cloud.firestore {
       // creation is Admin-SDK-only.
       allow create: if false;
 
-      // Restricted to exactly the two fields 1C allows changing, each
-      // gated by its own capability (1D): renaming needs company.update,
-      // suspending needs company.suspend -- Owner has both, Manager has
-      // only the former, everyone else has neither. This keeps even the
-      // Owner from rewriting ownerId or createdAt through this path.
-      allow update: if
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
-          && hasCapability(companyId, 'company.update'))
-        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-          && hasCapability(companyId, 'company.suspend'))
-        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'status'])
-          && hasCapability(companyId, 'company.update')
-          && hasCapability(companyId, 'company.suspend'));
+      // 1D allowed a direct, capability-gated client write here for
+      // rename/suspend. 1G removes that: a direct write has no server-side
+      // interception point to audit-log from, and "every mutation from
+      // 1B-1F is audited, no exceptions" (docs/phases/PHASE_1G_PLAN.md §2)
+      // doesn't hold with an un-auditable path left standing. Rename/
+      // suspend now go through updateCompanyAction/suspendCompanyAction
+      // (Admin SDK + audit log, same as every other mutation in Core).
+      allow update: if false;
 
       // No hard delete anywhere in 1C -- soft-deactivation via the update
       // rule above (status -> 'suspended') is the only "deletion."
@@ -202,6 +205,18 @@ service cloud.firestore {
           allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
           allow write: if false;
         }
+      }
+
+      // --- Audit Logs (1G) -------------------------------------------------
+      // Not branch-scoped (an audit trail spans the whole company); gated
+      // by audit.view instead (Owner/Manager only -- audit history is
+      // manager-level visibility, not frontline). Written exclusively by
+      // core/audit-logs's writeAuditInTransaction(), always inside the same
+      // transaction as the mutation it records -- never a standalone write,
+      // so this rule never needs to allow one.
+      match /auditLogs/{logId} {
+        allow read: if hasCapability(companyId, 'audit.view') || isSuperAdmin();
+        allow write: if false;
       }
     }
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireCapabilityMock = vi.fn();
 const hasBranchAccessMock = vi.fn();
+const writeAuditInTransactionMock = vi.fn();
 
 const itemGetMock = vi.fn();
 const stockGetMock = vi.fn();
@@ -14,6 +15,13 @@ vi.mock("@/core/roles-permissions", () => ({
 
 vi.mock("@/core/companies/membership", () => ({
   hasBranchAccess: (...args: unknown[]) => hasBranchAccessMock(...args),
+}));
+
+// Audit logging (1G) is exercised for real in the emulator tests; here it's
+// mocked out so it doesn't need its own auditLogs-collection entry in the
+// fake adminDb below, which only models inventoryItems/stock/movements.
+vi.mock("@/core/audit-logs", () => ({
+  writeAuditInTransaction: (...args: unknown[]) => writeAuditInTransactionMock(...args),
 }));
 
 // A fake Firestore transaction: each mocked doc ref carries its own
