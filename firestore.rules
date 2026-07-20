@@ -16,6 +16,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    // SuperAdmin is a global custom claim, never a membership role (1D,
+    // mirrors core/roles-permissions) -- it grants a cross-tenant *read*
+    // bypass only; no write path in this file checks it.
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.superAdmin == true;
+    }
+
     function membershipDoc(companyId) {
       return /databases/$(database)/documents/companies/$(companyId)/memberships/$(request.auth.uid);
     }
@@ -30,8 +37,23 @@ service cloud.firestore {
       return get(membershipDoc(companyId)).data.role;
     }
 
-    function isOwner(companyId) {
-      return isActiveMember(companyId) && memberRole(companyId) == 'Owner';
+    // Hand-maintained mirror of core/roles-permissions/matrix.ts's
+    // ROLE_CAPABILITIES -- rules can't import TypeScript, so this list must
+    // be kept in sync by hand whenever the matrix changes. Only the two
+    // capabilities this file actually needs to check are modeled here
+    // (company.update, company.suspend); memberships/branches writes stay
+    // Admin-SDK-only (allow write: if false below) so their capabilities
+    // never need a rules-side equivalent.
+    function roleCapabilities(role) {
+      return role == 'Owner'
+        ? ['company.update', 'company.suspend']
+        : role == 'Manager'
+          ? ['company.update']
+          : [];
+    }
+
+    function hasCapability(companyId, capability) {
+      return isActiveMember(companyId) && capability in roleCapabilities(memberRole(companyId));
     }
 
     // --- users/{uid} -----------------------------------------------------
@@ -51,8 +73,9 @@ service cloud.firestore {
     match /companies/{companyId} {
       // Company existence/name is tenant data, not public -- membership
       // (active OR suspended company) is required to read it at all, so an
-      // Owner can still see their own suspended company.
-      allow read: if isActiveMember(companyId);
+      // Owner can still see their own suspended company. SuperAdmin reads
+      // across every company regardless of membership (1D, support/ops).
+      allow read: if isActiveMember(companyId) || isSuperAdmin();
 
       // Onboarding is the only creation path and it runs entirely
       // server-side inside a single Firestore transaction that also reads
@@ -62,12 +85,19 @@ service cloud.firestore {
       // creation is Admin-SDK-only.
       allow create: if false;
 
-      // Owner-only, and restricted to exactly the two fields 1C allows
-      // changing -- this keeps even the Owner from rewriting ownerId or
-      // createdAt through this path, and keeps every other role from
-      // renaming or suspending the company at all.
-      allow update: if isOwner(companyId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'status']);
+      // Restricted to exactly the two fields 1C allows changing, each
+      // gated by its own capability (1D): renaming needs company.update,
+      // suspending needs company.suspend -- Owner has both, Manager has
+      // only the former, everyone else has neither. This keeps even the
+      // Owner from rewriting ownerId or createdAt through this path.
+      allow update: if
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && hasCapability(companyId, 'company.update'))
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && hasCapability(companyId, 'company.suspend'))
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'status'])
+          && hasCapability(companyId, 'company.update')
+          && hasCapability(companyId, 'company.suspend'));
 
       // No hard delete anywhere in 1C -- soft-deactivation via the update
       // rule above (status -> 'suspended') is the only "deletion."
@@ -78,8 +108,9 @@ service cloud.firestore {
         // company metadata every member should be able to see; branchIds
         // scoping (via each member's own membership document) matters for
         // *operational data* nested under a branch in later phases, not for
-        // the visibility of the branch document itself.
-        allow read: if isActiveMember(companyId);
+        // the visibility of the branch document itself. SuperAdmin read
+        // bypass mirrors the parent company (1D).
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
 
         // 1C creates exactly one branch (the onboarding transaction's
         // default branch) and has no "add another branch" UI yet.
@@ -89,11 +120,13 @@ service cloud.firestore {
       match /memberships/{memberUid} {
         // Any active member can see the roster (role/branchIds) -- this is
         // not a user-profile read (see users/{uid} above), just "who is on
-        // this team and what's their role."
-        allow read: if isActiveMember(companyId);
+        // this team and what's their role." SuperAdmin read bypass mirrors
+        // the parent company (1D).
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
 
-        // Only ever created by the onboarding transaction in 1C -- no
-        // invite/add-member or role-change UI exists yet.
+        // Created by the onboarding transaction (1C); role/status changes
+        // now flow through capability-gated server actions (1D) -- both
+        // remain Admin-SDK-only, so direct client writes stay denied here.
         allow write: if false;
       }
     }

@@ -3,11 +3,12 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 
 import { listMyCompanies } from "./membership";
+import type { MembershipRole } from "./types";
 
 export type MyCompanySummary = {
   companyId: string;
   companyName: string;
-  role: string;
+  role: MembershipRole;
   branchName: string | null;
 };
 

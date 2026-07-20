@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getMock = vi.fn();
+const updateMock = vi.fn();
+const membersWhereGetMock = vi.fn();
 const collectionGroupGetMock = vi.fn();
 const requireSessionMock = vi.fn();
 const redirectMock = vi.fn((url: string) => {
@@ -14,6 +16,10 @@ vi.mock("@/lib/firebase/admin", () => ({
         collection: () => ({
           doc: () => ({
             get: () => getMock(),
+            update: (...args: unknown[]) => updateMock(...args),
+          }),
+          where: () => ({
+            get: () => membersWhereGetMock(),
           }),
         }),
       }),
@@ -146,5 +152,83 @@ describe("listMyCompanies", () => {
     const { listMyCompanies } = await import("./membership");
 
     await expect(listMyCompanies("uid-1")).resolves.toEqual([]);
+  });
+});
+
+function fakeQuerySnapshot(docs: Record<string, unknown>[]) {
+  return { docs: docs.map((data) => ({ data: () => data })) };
+}
+
+describe("listCompanyMembers", () => {
+  it("maps active memberships, defaulting a malformed branchIds to []", async () => {
+    membersWhereGetMock.mockResolvedValue(
+      fakeQuerySnapshot([
+        { uid: "owner-1", role: "Owner", branchIds: [], status: "active" },
+        { uid: "manager-1", role: "Manager", status: "active" },
+      ]),
+    );
+    const { listCompanyMembers } = await import("./membership");
+
+    await expect(listCompanyMembers("company-1")).resolves.toEqual([
+      { uid: "owner-1", role: "Owner", branchIds: [], status: "active" },
+      { uid: "manager-1", role: "Manager", branchIds: [], status: "active" },
+    ]);
+  });
+});
+
+describe("isLastActiveOwner", () => {
+  it("returns false when the target is not an Owner", async () => {
+    getMock.mockResolvedValue(fakeDocSnapshot(true, { uid: "manager-1", role: "Manager", branchIds: [], status: "active" }));
+    const { isLastActiveOwner } = await import("./membership");
+
+    await expect(isLastActiveOwner("company-1", "manager-1")).resolves.toBe(false);
+  });
+
+  it("returns false when the target is not found", async () => {
+    getMock.mockResolvedValue(fakeDocSnapshot(false));
+    const { isLastActiveOwner } = await import("./membership");
+
+    await expect(isLastActiveOwner("company-1", "ghost-uid")).resolves.toBe(false);
+  });
+
+  it("returns true when the target is the only active Owner", async () => {
+    getMock.mockResolvedValue(fakeDocSnapshot(true, { uid: "owner-1", role: "Owner", branchIds: [], status: "active" }));
+    membersWhereGetMock.mockResolvedValue(
+      fakeQuerySnapshot([{ uid: "owner-1", role: "Owner", branchIds: [], status: "active" }]),
+    );
+    const { isLastActiveOwner } = await import("./membership");
+
+    await expect(isLastActiveOwner("company-1", "owner-1")).resolves.toBe(true);
+  });
+
+  it("returns false when another active Owner exists", async () => {
+    getMock.mockResolvedValue(fakeDocSnapshot(true, { uid: "owner-1", role: "Owner", branchIds: [], status: "active" }));
+    membersWhereGetMock.mockResolvedValue(
+      fakeQuerySnapshot([
+        { uid: "owner-1", role: "Owner", branchIds: [], status: "active" },
+        { uid: "owner-2", role: "Owner", branchIds: [], status: "active" },
+      ]),
+    );
+    const { isLastActiveOwner } = await import("./membership");
+
+    await expect(isLastActiveOwner("company-1", "owner-1")).resolves.toBe(false);
+  });
+});
+
+describe("updateMembershipRole", () => {
+  it("updates only the role field on the target membership doc", async () => {
+    const { updateMembershipRole } = await import("./membership");
+    await updateMembershipRole("company-1", "uid-1", "Manager");
+
+    expect(updateMock).toHaveBeenCalledWith({ role: "Manager" });
+  });
+});
+
+describe("deactivateMembership", () => {
+  it("sets status to disabled on the target membership doc", async () => {
+    const { deactivateMembership } = await import("./membership");
+    await deactivateMembership("company-1", "uid-1");
+
+    expect(updateMock).toHaveBeenCalledWith({ status: "disabled" });
   });
 });

@@ -52,7 +52,7 @@ export const getSession = cache(async (): Promise<AuthSession | null> => {
 
   try {
     const decoded = await adminAuth.verifySessionCookie(sessionCookie, /* checkRevoked */ true);
-    return { uid: decoded.uid, email: decoded.email ?? null };
+    return { uid: decoded.uid, email: decoded.email ?? null, superAdmin: decoded.superAdmin === true };
   } catch {
     return null;
   }

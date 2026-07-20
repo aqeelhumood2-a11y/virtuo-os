@@ -98,7 +98,22 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: users/companies/branche
       );
     });
 
-    it("denies a non-owner member from updating the company", async () => {
+    it("denies a non-owner, non-manager member from updating the company at all", async () => {
+      await seedCompanyWithOwner("company-1", "owner-1");
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), "companies", "company-1", "memberships", "employee-1"), {
+          uid: "employee-1",
+          role: "Employee",
+          branchIds: [],
+          status: "active",
+        });
+      });
+      const employeeDb = testEnv.authenticatedContext("employee-1").firestore();
+      await assertFails(updateDoc(doc(employeeDb, "companies", "company-1"), { name: "Hacked" }));
+      await assertFails(updateDoc(doc(employeeDb, "companies", "company-1"), { status: "suspended" }));
+    });
+
+    it("allows a Manager to rename the company but not suspend it (1D capability split)", async () => {
       await seedCompanyWithOwner("company-1", "owner-1");
       await testEnv.withSecurityRulesDisabled(async (context) => {
         await setDoc(doc(context.firestore(), "companies", "company-1", "memberships", "manager-1"), {
@@ -109,7 +124,8 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: users/companies/branche
         });
       });
       const managerDb = testEnv.authenticatedContext("manager-1").firestore();
-      await assertFails(updateDoc(doc(managerDb, "companies", "company-1"), { name: "Hacked" }));
+      await assertSucceeds(updateDoc(doc(managerDb, "companies", "company-1"), { name: "Renamed by Manager" }));
+      await assertFails(updateDoc(doc(managerDb, "companies", "company-1"), { status: "suspended" }));
     });
 
     it("denies updating restricted fields even for the Owner", async () => {
@@ -121,6 +137,31 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: users/companies/branche
       await assertFails(
         updateDoc(doc(ownerDb, "companies", "company-1"), { name: "New", ownerId: "someone-else" }),
       );
+    });
+  });
+
+  describe("SuperAdmin read bypass (1D)", () => {
+    it("lets a superAdmin claim holder read a company, its branches, and its roster with no membership", async () => {
+      await seedCompanyWithOwner("company-1", "owner-1");
+      const superAdminDb = testEnv.authenticatedContext("superadmin-1", { superAdmin: true }).firestore();
+
+      await assertSucceeds(getDoc(doc(superAdminDb, "companies", "company-1")));
+      await assertSucceeds(getDoc(doc(superAdminDb, "companies", "company-1", "branches", "branch-1")));
+      await assertSucceeds(getDoc(doc(superAdminDb, "companies", "company-1", "memberships", "owner-1")));
+    });
+
+    it("still denies writes for a superAdmin claim holder (no write capability modeled in 1D)", async () => {
+      await seedCompanyWithOwner("company-1", "owner-1");
+      const superAdminDb = testEnv.authenticatedContext("superadmin-1", { superAdmin: true }).firestore();
+
+      await assertFails(updateDoc(doc(superAdminDb, "companies", "company-1"), { name: "Hacked" }));
+    });
+
+    it("does not grant the bypass without the superAdmin claim", async () => {
+      await seedCompanyWithOwner("company-1", "owner-1");
+      const strangerDb = testEnv.authenticatedContext("stranger-1", { superAdmin: false }).firestore();
+
+      await assertFails(getDoc(doc(strangerDb, "companies", "company-1")));
     });
   });
 

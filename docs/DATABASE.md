@@ -11,7 +11,7 @@ Status: **proposed, awaiting approval.** No collections beyond the infra smoke-t
 
 ## 2. Core collections (Phase 1–3)
 
-`users`, `companies`, `companies/{companyId}/branches`, and `companies/{companyId}/memberships` were implemented in Phase 1C exactly as below (see `docs/phases/PHASE_1C_PLAN.md` for the full rationale); the fields here supersede the earlier speculative sketch — `lastLoginAt`, `industry`, `settings`, `address`/`timezone`, and `capabilityOverrides`/`invitedBy` were all dropped as unused-at-the-time scaffolding, and `onboardedAt` was added as the transactional duplicate-onboarding guard.
+`users`, `companies`, `companies/{companyId}/branches`, and `companies/{companyId}/memberships` were implemented in Phase 1C exactly as below (see `docs/phases/PHASE_1C_PLAN.md` for the full rationale); the fields here supersede the earlier speculative sketch — `lastLoginAt`, `industry`, `settings`, `address`/`timezone`, and `invitedBy` were all dropped as unused-at-the-time scaffolding, and `onboardedAt` was added as the transactional duplicate-onboarding guard. `capabilityOverrides` was re-added in Phase 1D, per `ARCHITECTURE.md` §5's explicit allowance for it as a data-model-only field (no guard reads it yet).
 
 ```
 users/{uid}                                      # doc ID == Firebase Auth UID
@@ -31,6 +31,7 @@ companies/{companyId}/memberships/{uid}          # doc ID == uid, 1 membership p
   uid, role: Owner | Manager | Supervisor | Employee
   branchIds: string[]                             # branches this member is scoped to ([] = all)
   status (active|invited|disabled — only 'active' is ever produced in 1C), joinedAt
+  capabilityOverrides?: Capability[]               # 1D data-model allowance; unread until an override UI ships
   # SuperAdmin is a global concept (a custom claim), never a membership role
 
 companies/{companyId}/licenses/{licenseId}          # usually one active doc
@@ -99,9 +100,9 @@ Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are 
 
 ## 6. Security Rules strategy
 
-**Implemented (Phase 1C)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`: shared helpers (`isActiveMember`, `isOwner`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. There is no `hasCapability()`/capability-matrix yet — 1C's rules only special-case `'Owner'` vs. "any active member," since the full capability matrix is a Phase 1D concern. Every client write to these four collections is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, which bypasses rules entirely. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4.
+**Implemented (Phase 1C + 1D)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`: shared helpers (`isActiveMember`, `hasCapability`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. The `companies` update rule now checks `hasCapability(companyId, 'company.update' | 'company.suspend')`, a hand-maintained rules-side mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` (rules can't import TypeScript, so the two are kept in sync manually — see the comment in `firestore.rules`). `isSuperAdmin()` grants a cross-tenant read bypass on `companies`/`branches`/`memberships` for the global `superAdmin` custom claim; it grants no write access. Every client write to these four collections is still denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4 and `docs/phases/PHASE_1D_PLAN.md` §6.
 
-**Aspirational (Phase 1D+)**, once a real capability matrix exists, later collections (inventory, orders, etc.) are expected to follow the shape sketched originally:
+**Aspirational (Phase 1E+)**, once the Inventory/Order Engines exist, later collections are expected to follow the shape sketched originally:
 
 ```
 match /companies/{companyId}/{collection}/{docId} {

@@ -7,7 +7,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireSession } from "@/core/auth/session";
 
 import type { AuthSession } from "@/core/auth/types";
-import type { Membership } from "./types";
+import type { Membership, MembershipRole } from "./types";
 
 // Direct document read -- O(1), the same mechanism the Security Rules use
 // (companies/{companyId}/memberships/{uid}). This is the authoritative
@@ -86,4 +86,70 @@ export async function listMyCompanies(uid: string): Promise<CompanyMembershipSum
     companyId: doc.ref.parent.parent!.id,
     role: doc.data().role,
   }));
+}
+
+// The team roster for a single company -- backs the membership.view-gated
+// member list in 1D. A single equality filter (status), so it needs no
+// composite index beyond what 1C already declared.
+export async function listCompanyMembers(companyId: string): Promise<Membership[]> {
+  const snap = await adminDb
+    .collection("companies")
+    .doc(companyId)
+    .collection("memberships")
+    .where("status", "==", "active")
+    .get();
+
+  return snap.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      uid: data.uid,
+      role: data.role,
+      branchIds: Array.isArray(data.branchIds) ? data.branchIds : [],
+      status: data.status,
+    };
+  });
+}
+
+// Filtered in application code rather than with a second `where('role', ==,
+// 'Owner')` clause -- a company's roster is small, and this avoids needing
+// a second composite index for a check that only runs on role-change/
+// deactivation (see docs/DATABASE.md on indexes being a separate deploy
+// step, not something to add without a real, already-written query).
+async function countActiveOwners(companyId: string): Promise<number> {
+  const members = await listCompanyMembers(companyId);
+  return members.filter((member) => member.role === "Owner").length;
+}
+
+export async function isLastActiveOwner(companyId: string, uid: string): Promise<boolean> {
+  const membership = await getMembership(companyId, uid);
+  if (!membership || membership.role !== "Owner") return false;
+
+  const ownerCount = await countActiveOwners(companyId);
+  return ownerCount <= 1;
+}
+
+// Both of these are Admin-SDK-only mutations -- firestore.rules denies
+// direct client writes to memberships unconditionally (see 1C), so the
+// capability check in core/companies/members-actions.ts is the real
+// authorization boundary, not a Security Rule.
+export async function updateMembershipRole(
+  companyId: string,
+  uid: string,
+  role: MembershipRole,
+): Promise<void> {
+  await adminDb
+    .collection("companies")
+    .doc(companyId)
+    .collection("memberships")
+    .doc(uid)
+    .update({ role });
+}
+
+export async function deactivateMembership(companyId: string, uid: string): Promise<void> {
+  await adminDb
+    .collection("companies")
+    .doc(companyId)
+    .collection("memberships")
+    .doc(uid)
+    .update({ status: "disabled" });
 }
