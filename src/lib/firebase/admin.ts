@@ -5,23 +5,20 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 
+import { clientEnv } from "@/shared/config/client-env";
+import { serverEnv } from "@/shared/config/server-env";
+
 function createFirebaseAdminApp(): App {
   const existingApp = getApps()[0];
   if (existingApp) return existingApp;
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error(
-      "Missing Firebase Admin environment variables (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY). Check .env.local against .env.example.",
-    );
-  }
-
   return initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    credential: cert({
+      projectId: serverEnv.FIREBASE_PROJECT_ID,
+      clientEmail: serverEnv.FIREBASE_CLIENT_EMAIL,
+      privateKey: serverEnv.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+    storageBucket: clientEnv.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   });
 }
 

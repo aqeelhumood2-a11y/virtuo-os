@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      # Safe, non-secret placeholder values for the Firebase Web SDK config.
+      # NEXT_PUBLIC_* Firebase values are not secrets -- they are public
+      # identifiers meant to ship in the client bundle, protected by
+      # Firestore/Storage Security Rules rather than by being hidden. These
+      # placeholders exist only so `next build` has syntactically valid
+      # values to inline; they are not connected to any real Firebase
+      # project. Firebase Admin credentials (private, server-only) are
+      # deliberately NOT set here -- nothing in this workflow's build path
+      # requires them, and no secret is added to this file until a phase
+      # that genuinely needs it does so deliberately.
+      NEXT_PUBLIC_FIREBASE_API_KEY: "ci-placeholder-api-key"
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "ci-placeholder.firebaseapp.com"
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: "ci-placeholder"
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "ci-placeholder.firebasestorage.app"
+      NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000"
+      NEXT_PUBLIC_FIREBASE_APP_ID: "1:000000000000:web:0000000000000000000000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm run test
+
+      - run: npm run build
