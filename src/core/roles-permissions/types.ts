@@ -10,4 +10,6 @@ export type Capability =
   | "branch.view"
   | "membership.view"
   | "membership.updateRole"
-  | "membership.deactivate";
+  | "membership.deactivate"
+  | "inventory.view"
+  | "inventory.write";

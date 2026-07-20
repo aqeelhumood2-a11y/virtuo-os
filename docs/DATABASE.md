@@ -43,17 +43,21 @@ companies/{companyId}/apps/{appId}                  # install state, mirrors lic
 companies/{companyId}/connectors/{connectorId}
   status (connected|disconnected|error), lastSyncAt, config: {...}   # credentials NOT stored here, see §5
 
-# --- Inventory Engine (Core, reused by every vertical) ---
-companies/{companyId}/inventoryItems/{itemId}
-  sku, name, unit, category, isActive, defaultPrice
+# --- Inventory Engine (Core, reused by every vertical) --- implemented Phase 1E,
+# see docs/phases/PHASE_1E_PLAN.md
+companies/{companyId}/inventoryItems/{itemId}          # company-wide catalog, not branch-scoped
+  sku, name, unit, category, isActive, defaultPrice, createdAt
 
 companies/{companyId}/stock/{stockId}                # stockId = `${branchId}_${itemId}` for O(1) lookup
   branchId, itemId, quantityOnHand, reorderPoint, updatedAt
 
 companies/{companyId}/inventoryMovements/{movementId}
   itemId, branchId, type (receive|adjust|transfer|sale|waste), quantityDelta, itemNameSnapshot,
-  reason, performedBy, relatedOrderId?, createdAt
-  # append-only audit trail; quantityOnHand on `stock` is the derived/cached total
+  reason, performedBy, transferGroupId? (links a transfer's paired out/in entries), createdAt
+  # append-only audit trail; quantityOnHand on `stock` is the derived/cached total.
+  # 'sale' is reserved for the Order Engine (1F) to write -- no 1E function produces it.
+  # relatedOrderId was dropped from the original sketch: nothing produces it until 1F exists,
+  # and it will be added then rather than carried as an unused field now.
 
 # --- Order Engine (Core, reused by every vertical) ---
 companies/{companyId}/orders/{orderId}
@@ -89,9 +93,11 @@ Rule: an App may create collections only under `companies/{companyId}/apps/{itsO
 
 **Implemented (Phase 1C):** one collection-group composite on `memberships`: `(uid ASC, status ASC)`, plus the field override enabling collection-group query scope on `memberships.uid`. This is exactly what `listMyCompanies(uid)` needs ("what companies do I belong to") — confirmed required the hard way: it was declared in `firestore.indexes.json` but not deployed to the live project during Phase 1C's manual verification, which surfaced a real `FAILED_PRECONDITION` error. **Deploying an index is a separate step from declaring it** (`firebase deploy --only firestore:indexes`, or the direct link Firestore's own error message provides) — noted here so it isn't missed again. Two other composites considered during planning (`branches (isActive, createdAt)`, per-company `memberships (status, joinedAt)`) were **removed** before implementation because no query in the actual code uses that shape yet — added incrementally as real queries are written, not speculatively upfront, per this section's own principle.
 
+**Implemented (Phase 1E):** none needed. `stock` and `inventoryMovements` are only ever queried with a single equality filter (`branchId`), which Firestore serves from its automatic single-field indexes — no composite declared or deployed. The `inventoryMovements: (itemId ASC, createdAt DESC)` composite anticipated below was deliberately **not** built in 1E because no function queries movements by item across branches yet (`listMovementsForBranch` only, see `docs/phases/PHASE_1E_PLAN.md` §6) — added only when a real caller needs it, per this section's own principle.
+
 Anticipated for later phases, added only once a real query needs them:
 - `orders`: `(branchId ASC, status ASC, createdAt DESC)`
-- `inventoryMovements`: `(itemId ASC, createdAt DESC)` and `(branchId ASC, createdAt DESC)`
+- `inventoryMovements`: `(itemId ASC, createdAt DESC)`, if a cross-branch per-item history view is ever built
 - `auditLogs`: `(actorId ASC, createdAt DESC)`
 
 ## 5. Secrets & credentials — explicitly NOT in Firestore
@@ -100,13 +106,6 @@ Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are 
 
 ## 6. Security Rules strategy
 
-**Implemented (Phase 1C + 1D)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`: shared helpers (`isActiveMember`, `hasCapability`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. The `companies` update rule now checks `hasCapability(companyId, 'company.update' | 'company.suspend')`, a hand-maintained rules-side mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` (rules can't import TypeScript, so the two are kept in sync manually — see the comment in `firestore.rules`). `isSuperAdmin()` grants a cross-tenant read bypass on `companies`/`branches`/`memberships` for the global `superAdmin` custom claim; it grants no write access. Every client write to these four collections is still denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4 and `docs/phases/PHASE_1D_PLAN.md` §6.
+**Implemented (Phase 1C + 1D + 1E)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`/`inventoryItems`/`stock`/`inventoryMovements`: shared helpers (`isActiveMember`, `hasCapability`, `hasBranchAccess`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. The `companies` update rule checks `hasCapability(companyId, 'company.update' | 'company.suspend')`, a hand-maintained rules-side mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` (rules can't import TypeScript, so the two are kept in sync manually — see the comment in `firestore.rules`). `stock`/`inventoryMovements` reads additionally require the caller's `branchIds` to include the document's `branchId` (empty `branchIds` = all branches) — the first real use of the branch-scoping promised back in 1C. `isSuperAdmin()` grants a cross-tenant read bypass on all of the above for the global `superAdmin` custom claim; it grants no write access anywhere. Every client write to these seven collections is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` (and, for stock/movements, `hasBranchAccess()`) before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4, `docs/phases/PHASE_1D_PLAN.md` §6, and `docs/phases/PHASE_1E_PLAN.md` §7.
 
-**Aspirational (Phase 1E+)**, once the Inventory/Order Engines exist, later collections are expected to follow the shape sketched originally:
-
-```
-match /companies/{companyId}/{collection}/{docId} {
-  allow read: if isMember(companyId);
-  allow write: if hasCapability(companyId, '<collection>.write');
-}
-```
+Note this **supersedes** the originally-sketched aspirational shape (a generic `hasCapability(companyId, '<collection>.write')` direct-client-write rule per collection) — `ARCHITECTURE.md` §6 is explicit that inventory adjustments go through server-side logic, not rule-gated direct writes, and the transfer/receive/waste transactions' cross-document atomicity couldn't be expressed safely as a rules-only invariant regardless. The Order Engine (1F) is expected to follow the same Admin-SDK-only pattern for the same reason.

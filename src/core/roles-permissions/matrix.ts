@@ -8,9 +8,11 @@ const ALL_CAPABILITIES: Capability[] = [
   "membership.view",
   "membership.updateRole",
   "membership.deactivate",
+  "inventory.view",
+  "inventory.write",
 ];
 
-const VIEW_ONLY: Capability[] = ["company.view", "branch.view", "membership.view"];
+const VIEW_ONLY: Capability[] = ["company.view", "branch.view", "membership.view", "inventory.view"];
 
 // The single source of truth for "who can do what" (ARCHITECTURE.md §4/§6).
 // firestore.rules mirrors the two capabilities it needs to check directly

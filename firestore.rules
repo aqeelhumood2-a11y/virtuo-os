@@ -20,7 +20,19 @@ service cloud.firestore {
     // mirrors core/roles-permissions) -- it grants a cross-tenant *read*
     // bypass only; no write path in this file checks it.
     function isSuperAdmin() {
-      return isSignedIn() && request.auth.token.superAdmin == true;
+      // Defends two distinct edge cases, both observed to throw rather
+      // than evaluate falsy: (1) request.auth.token itself can be null for
+      // a caller with no custom claims at all (as opposed to a present
+      // empty map), and (2) a claim key that was genuinely never set is an
+      // absent map key, not a present-but-null one. Both matter here
+      // specifically because this function is combined with `||`, and the
+      // rules emulator does not reliably short-circuit a custom-function
+      // right-hand side -- it can still be evaluated even when the
+      // left-hand side (e.g. isActiveMember()) is already true.
+      return isSignedIn()
+        && request.auth.token != null
+        && ('superAdmin' in request.auth.token)
+        && request.auth.token.superAdmin == true;
     }
 
     function membershipDoc(companyId) {
@@ -35,6 +47,21 @@ service cloud.firestore {
 
     function memberRole(companyId) {
       return get(membershipDoc(companyId)).data.role;
+    }
+
+    // Mirrors core/companies/membership.ts's hasBranchAccess(): an empty
+    // branchIds list means "every branch" (1C's default for the bootstrap
+    // Owner and any unscoped member); a non-empty list restricts reads to
+    // exactly those branches. Used only by 1E's branch-scoped collections
+    // (stock, inventoryMovements) -- company/branch/membership docs
+    // themselves aren't branch-scoped data.
+    function memberBranchIds(companyId) {
+      return get(membershipDoc(companyId)).data.branchIds;
+    }
+
+    function hasBranchAccess(companyId, branchId) {
+      return isActiveMember(companyId)
+        && (memberBranchIds(companyId).size() == 0 || branchId in memberBranchIds(companyId));
     }
 
     // Hand-maintained mirror of core/roles-permissions/matrix.ts's
@@ -127,6 +154,32 @@ service cloud.firestore {
         // Created by the onboarding transaction (1C); role/status changes
         // now flow through capability-gated server actions (1D) -- both
         // remain Admin-SDK-only, so direct client writes stay denied here.
+        allow write: if false;
+      }
+
+      // --- Inventory Engine (1E) -----------------------------------------
+      // Company-wide catalog -- every active member can see it (item
+      // identity/pricing isn't branch-sensitive), no branch scoping needed.
+      match /inventoryItems/{itemId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Stock and movements ARE branch-sensitive: this is the first use of
+      // the branchIds scoping promised back in 1C's membership rule
+      // comment. All mutation is Admin-SDK-only -- every stock change runs
+      // inside a Firestore transaction (stock update + movement write
+      // together) in core/inventory-engine, an atomicity guarantee that
+      // can't be expressed as a per-document Security Rule.
+      match /stock/{stockId} {
+        allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Append-only audit trail -- no update/delete path exists anywhere,
+      // including server-side.
+      match /inventoryMovements/{movementId} {
+        allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
         allow write: if false;
       }
     }

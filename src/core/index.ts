@@ -1,7 +1,7 @@
 // Core platform public barrel. Auth (1B), the Multi-Tenant Organization
-// Model (1C), and Roles & Permissions (1D) are implemented so far. The
-// Inventory Engine, the Order Engine, Audit Logs, and Notifications remain
-// reserved for later phases.
+// Model (1C), Roles & Permissions (1D), and the Inventory Engine (1E) are
+// implemented so far. The Order Engine, Audit Logs, and Notifications
+// remain reserved for later phases.
 export {
   signUpAction,
   signInAction,
@@ -36,6 +36,33 @@ export type {
 export { hasCapability, isSuperAdmin, requireCapability } from "./roles-permissions/guard";
 export { ROLE_CAPABILITIES, outranks } from "./roles-permissions/matrix";
 export type { Capability, Role } from "./roles-permissions/types";
+
+export {
+  adjustStock,
+  BranchAccessDeniedError,
+  createItem,
+  deactivateItem,
+  getItem,
+  getStockLevel,
+  InsufficientStockError,
+  ItemNotFoundError,
+  listItems,
+  listMovementsForBranch,
+  listStockForBranch,
+  receiveStock,
+  recordStockCount,
+  transferStock,
+  updateItem,
+  wasteStock,
+} from "./inventory-engine";
+export type {
+  CreateItemInput,
+  InventoryItem,
+  InventoryMovement,
+  MovementType,
+  Stock,
+  UpdateItemInput,
+} from "./inventory-engine";
 
 export { updateDisplayNameAction } from "./users/actions";
 export { getUserProfile } from "./users/profile";

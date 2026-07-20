@@ -13,23 +13,35 @@ describe("ROLE_CAPABILITIES", () => {
         "membership.view",
         "membership.updateRole",
         "membership.deactivate",
+        "inventory.view",
+        "inventory.write",
       ]),
     );
-    expect(ROLE_CAPABILITIES.Owner).toHaveLength(7);
+    expect(ROLE_CAPABILITIES.Owner).toHaveLength(9);
   });
 
   it("grants Manager everything except membership.updateRole and company.suspend", () => {
     expect(ROLE_CAPABILITIES.Manager).not.toContain("membership.updateRole");
     expect(ROLE_CAPABILITIES.Manager).not.toContain("company.suspend");
     expect(ROLE_CAPABILITIES.Manager).toEqual(
-      expect.arrayContaining(["company.view", "company.update", "branch.view", "membership.view", "membership.deactivate"]),
+      expect.arrayContaining([
+        "company.view",
+        "company.update",
+        "branch.view",
+        "membership.view",
+        "membership.deactivate",
+        "inventory.view",
+        "inventory.write",
+      ]),
     );
   });
 
-  it("grants Supervisor and Employee view-only capabilities", () => {
-    const viewOnly = ["company.view", "branch.view", "membership.view"];
+  it("grants Supervisor and Employee view-only capabilities, including inventory.view but not inventory.write", () => {
+    const viewOnly = ["company.view", "branch.view", "membership.view", "inventory.view"];
     expect(ROLE_CAPABILITIES.Supervisor.sort()).toEqual(viewOnly.sort());
     expect(ROLE_CAPABILITIES.Employee.sort()).toEqual(viewOnly.sort());
+    expect(ROLE_CAPABILITIES.Supervisor).not.toContain("inventory.write");
+    expect(ROLE_CAPABILITIES.Employee).not.toContain("inventory.write");
   });
 });
 
