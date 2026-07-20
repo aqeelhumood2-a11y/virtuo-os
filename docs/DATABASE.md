@@ -11,23 +11,27 @@ Status: **proposed, awaiting approval.** No collections beyond the infra smoke-t
 
 ## 2. Core collections (Phase 1–3)
 
+`users`, `companies`, `companies/{companyId}/branches`, and `companies/{companyId}/memberships` were implemented in Phase 1C exactly as below (see `docs/phases/PHASE_1C_PLAN.md` for the full rationale); the fields here supersede the earlier speculative sketch — `lastLoginAt`, `industry`, `settings`, `address`/`timezone`, and `capabilityOverrides`/`invitedBy` were all dropped as unused-at-the-time scaffolding, and `onboardedAt` was added as the transactional duplicate-onboarding guard.
+
 ```
-users/{userId}
-  displayName, email, photoURL, createdAt, lastLoginAt
+users/{uid}                                      # doc ID == Firebase Auth UID
+  uid, email, displayName, photoURL, status (active|disabled),
+  onboardedAt (set once, inside the onboarding transaction), createdAt
   # NOT company-scoped — a user can belong to multiple companies
 
 companies/{companyId}
-  name, industry, ownerId, createdAt, status (active|suspended)
-  settings: { branding: {...}, locale, timezone, currency }
+  name, ownerId (creator/initial Owner; provenance, not the authorization
+  source -- that's always the membership role), status (active|suspended),
+  createdAt
 
 companies/{companyId}/branches/{branchId}
-  name, address, timezone, isActive
+  name, isActive, isDefault (true only for onboarding's default branch), createdAt
 
-companies/{companyId}/memberships/{userId}       # doc ID == userId, 1 membership per user per company
-  role: SuperAdmin | Owner | Manager | Supervisor | Employee
+companies/{companyId}/memberships/{uid}          # doc ID == uid, 1 membership per user per company
+  uid, role: Owner | Manager | Supervisor | Employee
   branchIds: string[]                             # branches this member is scoped to ([] = all)
-  capabilityOverrides?: Record<string, boolean>    # optional per-user grants/revokes on top of role default
-  invitedBy, joinedAt, status (invited|active|disabled)
+  status (active|invited|disabled — only 'active' is ever produced in 1C), joinedAt
+  # SuperAdmin is a global concept (a custom claim), never a membership role
 
 companies/{companyId}/licenses/{licenseId}          # usually one active doc
   plan, installedApps: string[], installedConnectors: string[], seats, renewsAt
@@ -82,7 +86,9 @@ Rule: an App may create collections only under `companies/{companyId}/apps/{itsO
 
 ## 4. Indexes
 
-Anticipated composite indexes (finalized during Phase 1/3 implementation, added incrementally to `firestore.indexes.json` as real queries are written — not speculatively upfront):
+**Implemented (Phase 1C):** one collection-group composite on `memberships`: `(uid ASC, status ASC)`, plus the field override enabling collection-group query scope on `memberships.uid`. This is exactly what `listMyCompanies(uid)` needs ("what companies do I belong to") — confirmed required the hard way: it was declared in `firestore.indexes.json` but not deployed to the live project during Phase 1C's manual verification, which surfaced a real `FAILED_PRECONDITION` error. **Deploying an index is a separate step from declaring it** (`firebase deploy --only firestore:indexes`, or the direct link Firestore's own error message provides) — noted here so it isn't missed again. Two other composites considered during planning (`branches (isActive, createdAt)`, per-company `memberships (status, joinedAt)`) were **removed** before implementation because no query in the actual code uses that shape yet — added incrementally as real queries are written, not speculatively upfront, per this section's own principle.
+
+Anticipated for later phases, added only once a real query needs them:
 - `orders`: `(branchId ASC, status ASC, createdAt DESC)`
 - `inventoryMovements`: `(itemId ASC, createdAt DESC)` and `(branchId ASC, createdAt DESC)`
 - `auditLogs`: `(actorId ASC, createdAt DESC)`
@@ -93,7 +99,9 @@ Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are 
 
 ## 6. Security Rules strategy
 
-One rule per collection, each derived from the same `capability-matrix.ts` used server-side (see `ARCHITECTURE.md` §6), generally of the shape:
+**Implemented (Phase 1C)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`: shared helpers (`isActiveMember`, `isOwner`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. There is no `hasCapability()`/capability-matrix yet — 1C's rules only special-case `'Owner'` vs. "any active member," since the full capability matrix is a Phase 1D concern. Every client write to these four collections is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, which bypasses rules entirely. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4.
+
+**Aspirational (Phase 1D+)**, once a real capability matrix exists, later collections (inventory, orders, etc.) are expected to follow the shape sketched originally:
 
 ```
 match /companies/{companyId}/{collection}/{docId} {
@@ -101,5 +109,3 @@ match /companies/{companyId}/{collection}/{docId} {
   allow write: if hasCapability(companyId, '<collection>.write');
 }
 ```
-
-with `isMember()` / `hasCapability()` helper functions reading `companies/{companyId}/memberships/{request.auth.uid}` — implemented once, reused across every match block, not re-derived per collection.

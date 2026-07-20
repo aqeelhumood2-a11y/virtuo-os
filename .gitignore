@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+# Fake, disposable credentials for Firestore/Auth Emulator test runs only --
+# never real secrets. See .env.test's own header comment.
+!.env.test
 
 # firebase
 .firebase/

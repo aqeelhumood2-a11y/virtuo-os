@@ -9,4 +9,5 @@ export const RATE_LIMITS = {
   signIn: { limit: 10, windowMs: 15 * 60 * 1000 },
   signUp: { limit: 5, windowMs: 15 * 60 * 1000 },
   passwordReset: { limit: 5, windowMs: 15 * 60 * 1000 },
+  onboarding: { limit: 5, windowMs: 15 * 60 * 1000 },
 } as const;

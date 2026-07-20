@@ -2,13 +2,105 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default: authenticated users can only read/write their own user document.
-    // Tighten or extend per-collection as real data models are added.
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    // --- Shared helpers -----------------------------------------------
+    // One definition of each check, reused across every match block below
+    // (mirrors the single-source-of-truth principle used for the
+    // capability matrix elsewhere in Core).
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Deny everything else by default until explicit rules are added.
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function membershipDoc(companyId) {
+      return /databases/$(database)/documents/companies/$(companyId)/memberships/$(request.auth.uid);
+    }
+
+    function isActiveMember(companyId) {
+      return isSignedIn()
+        && exists(membershipDoc(companyId))
+        && get(membershipDoc(companyId)).data.status == 'active';
+    }
+
+    function memberRole(companyId) {
+      return get(membershipDoc(companyId)).data.role;
+    }
+
+    function isOwner(companyId) {
+      return isActiveMember(companyId) && memberRole(companyId) == 'Owner';
+    }
+
+    // --- users/{uid} -----------------------------------------------------
+    // Self-read-only: there is no legitimate reason in this phase for one
+    // user to read another user's profile document, and this also means a
+    // compromised client can never enumerate other users via Firestore.
+    // Write is unconditionally denied: every legitimate write (onboarding's
+    // upsert, a self-only displayName edit) goes through server code using
+    // the Admin SDK, which is not subject to these rules at all -- this
+    // rule's only job is to block *direct client* writes, never authored
+    // to express the real authorization logic (that lives server-side).
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
+
+    match /companies/{companyId} {
+      // Company existence/name is tenant data, not public -- membership
+      // (active OR suspended company) is required to read it at all, so an
+      // Owner can still see their own suspended company.
+      allow read: if isActiveMember(companyId);
+
+      // Onboarding is the only creation path and it runs entirely
+      // server-side inside a single Firestore transaction that also reads
+      // a *different* document (users/{uid}) to guard against duplicate
+      // onboarding -- that precondition cannot be expressed as a
+      // per-document Security Rule in a way that stays race-safe, so
+      // creation is Admin-SDK-only.
+      allow create: if false;
+
+      // Owner-only, and restricted to exactly the two fields 1C allows
+      // changing -- this keeps even the Owner from rewriting ownerId or
+      // createdAt through this path, and keeps every other role from
+      // renaming or suspending the company at all.
+      allow update: if isOwner(companyId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'status']);
+
+      // No hard delete anywhere in 1C -- soft-deactivation via the update
+      // rule above (status -> 'suspended') is the only "deletion."
+      allow delete: if false;
+
+      match /branches/{branchId} {
+        // The branch document itself (name, active flag) is low-sensitivity
+        // company metadata every member should be able to see; branchIds
+        // scoping (via each member's own membership document) matters for
+        // *operational data* nested under a branch in later phases, not for
+        // the visibility of the branch document itself.
+        allow read: if isActiveMember(companyId);
+
+        // 1C creates exactly one branch (the onboarding transaction's
+        // default branch) and has no "add another branch" UI yet.
+        allow write: if false;
+      }
+
+      match /memberships/{memberUid} {
+        // Any active member can see the roster (role/branchIds) -- this is
+        // not a user-profile read (see users/{uid} above), just "who is on
+        // this team and what's their role."
+        allow read: if isActiveMember(companyId);
+
+        // Only ever created by the onboarding transaction in 1C -- no
+        // invite/add-member or role-change UI exists yet.
+        allow write: if false;
+      }
+    }
+
+    // Default deny: anything not explicitly matched above (including any
+    // future top-level collection added without updating this file) has no
+    // access at all.
     match /{document=**} {
       allow read, write: if false;
     }

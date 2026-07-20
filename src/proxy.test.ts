@@ -62,4 +62,15 @@ describe("proxy", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://example.com/login");
   });
+
+  it("redirects to /login when accessing /onboarding without a session cookie", () => {
+    const response = proxy(makeRequest("/onboarding"));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://example.com/login");
+  });
+
+  it("also ensures a CSRF cookie exists on /onboarding", () => {
+    const response = proxy(makeRequest("/onboarding", { session: "some-cookie-value" }));
+    expect(response.cookies.get("csrf_token")?.value).toBeTruthy();
+  });
 });
