@@ -69,6 +69,10 @@ Design system (Tailwind-based UI kit), generic hooks/utils/types used across eve
 - All writes that matter (inventory adjustments, order status changes, user/role changes, app installs, connector config) go through server-side logic (Server Actions / Route Handlers using the Admin SDK), not raw client SDK writes — the client SDK is used for reads/realtime subscriptions and Auth only.
 - No secret ever ships in a client bundle: connector credentials, service-account keys, and API secrets are server-only env vars, validated at startup (fail fast, not silent `undefined`).
 
-## 7. Open decisions requiring your input before Phase 1 build starts
+## 7. Decisions locked in with you
 
-See the questions at the end of the roadmap message — vertical-app priority order and a couple of provider specifics are genuinely your call, not mine to assume.
+- **Vertical priority is deferred**, not assumed: Phase 1 builds the entire Core — including Inventory and Order Engines — with zero vertical bias, and the first App to build is chosen at the start of Phase 3, once there's real Core + App infrastructure to build it against.
+- **Auth providers:** Email/Password only for Phase 1. Google/Microsoft/Apple are added later, each as an additive provider config, only when needed — not stubbed speculatively now.
+- **Hosting:** Vercel, per the spec. Firebase is backend-only (Auth/Firestore/Storage).
+
+See `ROADMAP.md` for how this plays out phase by phase.
