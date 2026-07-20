@@ -1,6 +1,6 @@
 # Virtuo OS — Development Roadmap
 
-Status: **proposed, awaiting approval to start Phase 1.** See `ARCHITECTURE.md`, `FOLDER_STRUCTURE.md`, `DATABASE.md` for the detail behind each phase below.
+Status: **overall direction approved. Phase 1 is broken into sub-phases 1A–1G below; implementation has not started on any of them.** See `ARCHITECTURE.md`, `FOLDER_STRUCTURE.md`, `DATABASE.md` for the detail behind each phase.
 
 ## Decisions locked in
 
@@ -14,19 +14,53 @@ Status: **proposed, awaiting approval to start Phase 1.** See `ARCHITECTURE.md`,
 - Auth provider setup and Storage bucket provisioning pending your one-time console action (tracked outside this roadmap).
 
 ## Phase 1 — Complete Core Platform
-1.1 Add Tailwind CSS + design tokens; stand up `shared/ui` with the base primitives (Button, Input, Card, Table, Modal, Form field).
-1.2 Auth flows: register, login, logout, password reset, protected route middleware, `core/auth` session layer (Email/Password only).
-1.3 `core/users`, `core/companies`, `core/branches` data models + server-side CRUD.
-1.4 `core/roles-permissions`: capability matrix, guard functions, membership repository.
-1.5 Company onboarding flow: register → create company → become Owner → create first branch.
-1.6 `core/inventory-engine`: items, per-branch stock, movements, adjust/receive/transfer use-cases, Clean Architecture layering (domain/application/infrastructure). Built and tested generically — no vertical assumptions.
-1.7 `core/order-engine`: orders, order lines, status state machine, totals calculation. Same generic constraint.
-1.8 `core/audit-logs`: single write-through logger wired into every mutation path from day one (users, companies, branches, memberships, inventory, orders).
-1.9 `core/notifications`: in-app channel now, interface ready for email/WhatsApp later.
-1.10 Firestore Security Rules for every Core collection above, derived from the capability matrix.
-1.11 ESLint import-boundary rules enforcing the Core/Apps/Connectors folder boundaries — real from the first commit, not retrofitted.
 
-**Milestone 1:** A user can register, create a company, invite a teammate with an assigned role, and see a role-gated dashboard shell. Inventory items can be created and stock adjusted; Orders can be created and transitioned through their status lifecycle — all through Core APIs, with no vertical UI, fully audit-logged and rule-protected. This is the point at which the Core is demonstrably industry-agnostic.
+Phase 1 is too large to execute as one block, so it is split into seven independently testable sub-phases, 1A → 1G, each gated on explicit approval before the next one starts.
+
+### Sub-phase workflow (applies to every one of 1A–1G)
+
+1. Produce a detailed implementation plan before writing any code: exact files to create/modify, data models, security rules, acceptance criteria.
+2. Wait for that plan to be approved.
+3. Implement **only** that sub-phase — nothing from a later sub-phase, no vertical logic, no Apps/Connectors.
+4. Run lint, type-check, tests, and a production build; all must pass.
+5. Commit and push.
+6. Stop and provide a review report (what was built, how it was verified, anything deferred or flagged).
+7. Wait for approval before starting the next sub-phase.
+
+### Standing architecture rules (apply to all of Phase 1, every sub-phase)
+
+- Core remains completely business-agnostic — no Restaurant/Retail/Coffee Shop/Warehouse/vertical-specific logic anywhere in Phase 1.
+- Apps and Connectors are not implemented yet.
+- Firebase Admin credentials are never exposed to client code; `NEXT_PUBLIC_*` env vars never carry private/secret values.
+- Every query and mutation enforces tenant isolation (`companyId`/`branchId` scoping).
+- Client-provided `companyId`, `branchId`, `role`, and `permissions` are never trusted — authorization is always re-checked server-side against the stored membership record.
+- No mock or fake production data unless explicitly requested.
+- The agreed architecture (`ARCHITECTURE.md`, `FOLDER_STRUCTURE.md`, `DATABASE.md`) is not modified without going back for approval first.
+
+### Phase 1A — Foundation
+Tailwind CSS; base `shared/ui` kit; project structure (`src/core`, `src/apps`, `src/connectors`, `src/settings`, `src/shared` scaffolding); shared types; environment-variable validation (fail fast on missing/misconfigured env); ESLint import-boundary rules; CI checks (lint, type-check, test, build on push). No business features, no data models, no Firestore rules — this phase is pure scaffolding and tooling.
+
+### Phase 1B — Authentication and Sessions
+Email/password authentication; secure server-side session layer; protected-route middleware; sign in; sign out; password reset; auth error handling; auth tests. Firestore/Auth security rules scoped to exactly what this phase needs (account existence, no company/tenant data model yet).
+
+### Phase 1C — Multi-Tenant Organization Model
+`core/users`, `core/companies`, `core/branches`, `core/roles-permissions`'s membership records (data model only, not full RBAC yet — see 1D); company onboarding flow; CRUD operations for all of the above; tenant isolation enforced on every read/write; tests; Firestore rules for these resources.
+
+### Phase 1D — Roles and Permissions
+RBAC capability matrix; the five fixed roles (Super Admin, Company Owner, Manager, Supervisor, Employee); server-side authorization guards; UI-level permission guards (hide/disable, never the sole enforcement); tests proving unauthorized access is denied at the server, not just hidden in the UI.
+
+### Phase 1E — Generic Inventory Engine
+Generic items; units of measure; stock locations; stock balances; stock movements; adjustments; transfers; counts; immutable movement history; atomic transactions (no partial stock updates); tests and Firestore rules.
+
+### Phase 1F — Generic Order Engine
+Generic orders; order lines; status lifecycle; inventory deduction routed through the Inventory Engine (never a direct write to stock); pending-order handling; idempotency (safe to retry a mutation without double-effect); transaction safety; tests and Firestore rules.
+
+### Phase 1G — Audit Logs and Notifications
+Audit every mutation from 1B–1F; before/after values captured where safe to do so; actor, company, branch, timestamp, and action recorded on every entry; immutable audit records (append-only, no update/delete); in-app notifications; read/unread state; tests and Firestore rules.
+
+**Milestone 1 (end of 1G):** A user can register, create a company, invite a teammate with an assigned role, and see a role-gated dashboard shell. Inventory items can be created and stock adjusted; Orders can be created and transitioned through their status lifecycle — all through Core APIs, with no vertical UI, every mutation audit-logged, tenant-isolated, and rule-protected. This is the point at which the Core is demonstrably industry-agnostic.
+
+Implementation does not begin on 1A until explicitly approved. Each subsequent sub-phase requires its own explicit approval in turn.
 
 ## Phase 2 — App & Connector Infrastructure
 2.1 `apps-registry`: `AppManifest` type, registration, per-company install/uninstall state.
@@ -77,4 +111,4 @@ Status: **proposed, awaiting approval to start Phase 1.** See `ARCHITECTURE.md`,
 
 ---
 
-Everything above is a plan, not code. Phase 1 does not start until you give the go-ahead.
+Everything above is a plan, not code. Phase 1A does not start until you give the go-ahead.
