@@ -3,14 +3,18 @@ export type { CreateItemInput, UpdateItemInput } from "./application/items";
 
 export {
   adjustStock,
+  applyStockChangeInTransaction,
+  commitStockChangePlan,
   getStockLevel,
   listMovementsForBranch,
   listStockForBranch,
+  planStockChange,
   receiveStock,
   recordStockCount,
   transferStock,
   wasteStock,
 } from "./application/stock";
+export type { ApplyStockChangeParams, StockChangePlan } from "./application/stock";
 
-export { BranchAccessDeniedError, InsufficientStockError, ItemNotFoundError } from "./domain/errors";
+export { InsufficientStockError, ItemNotFoundError } from "./domain/errors";
 export type { InventoryItem, InventoryMovement, MovementType, Stock } from "./domain/types";

@@ -182,6 +182,27 @@ service cloud.firestore {
         allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
         allow write: if false;
       }
+
+      // --- Order Engine (1F) ----------------------------------------------
+      // Branch-sensitive, same pattern as stock/inventoryMovements above.
+      // All mutation is Admin-SDK-only: creating an order, completing it
+      // (which deducts stock through the Inventory Engine in the same
+      // transaction), and voiding it are all multi-document, atomicity-
+      // dependent operations that can't be expressed as a per-document
+      // Security Rule.
+      match /orders/{orderId} {
+        allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+        allow write: if false;
+
+        // Lines carry their own denormalized branchId (copied from the
+        // parent order at write time) so this rule never needs a parent
+        // lookup -- same reasoning as inventoryMovements carrying its own
+        // branchId instead of requiring a join back to `stock`.
+        match /lines/{lineId} {
+          allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+          allow write: if false;
+        }
+      }
     }
 
     // Default deny: anything not explicitly matched above (including any

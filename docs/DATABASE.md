@@ -59,12 +59,16 @@ companies/{companyId}/inventoryMovements/{movementId}
   # relatedOrderId was dropped from the original sketch: nothing produces it until 1F exists,
   # and it will be added then rather than carried as an unused field now.
 
-# --- Order Engine (Core, reused by every vertical) ---
+# --- Order Engine (Core, reused by every vertical) --- implemented Phase 1F,
+# see docs/phases/PHASE_1F_PLAN.md
 companies/{companyId}/orders/{orderId}
-  branchId, appId (which App created it: retail|restaurant|...), status,
+  branchId, appId (free-form tag naming which App created it -- no App
+  registry exists until Phase 3, so this is recorded, never validated),
+  status: pending | completed | voided,
   customerRef?, totals: { subtotal, tax, discount, total }, createdBy, createdAt, updatedAt
 
 companies/{companyId}/orders/{orderId}/lines/{lineId}    # subcollection: always read with the parent order
+  branchId (denormalized from the parent order, same reason inventoryMovements carries its own),
   itemId, itemNameSnapshot, quantity, unitPrice, lineTotal
 
 # --- Cross-cutting Core services ---
@@ -95,8 +99,10 @@ Rule: an App may create collections only under `companies/{companyId}/apps/{itsO
 
 **Implemented (Phase 1E):** none needed. `stock` and `inventoryMovements` are only ever queried with a single equality filter (`branchId`), which Firestore serves from its automatic single-field indexes — no composite declared or deployed. The `inventoryMovements: (itemId ASC, createdAt DESC)` composite anticipated below was deliberately **not** built in 1E because no function queries movements by item across branches yet (`listMovementsForBranch` only, see `docs/phases/PHASE_1E_PLAN.md` §6) — added only when a real caller needs it, per this section's own principle.
 
+**Implemented (Phase 1F):** none needed, same reasoning as 1E — `listOrdersForBranch` uses a single `branchId` equality filter.
+
 Anticipated for later phases, added only once a real query needs them:
-- `orders`: `(branchId ASC, status ASC, createdAt DESC)`
+- `orders`: `(branchId ASC, status ASC, createdAt DESC)`, if a status-filtered or sorted order list is ever built
 - `inventoryMovements`: `(itemId ASC, createdAt DESC)`, if a cross-branch per-item history view is ever built
 - `auditLogs`: `(actorId ASC, createdAt DESC)`
 
@@ -106,6 +112,6 @@ Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are 
 
 ## 6. Security Rules strategy
 
-**Implemented (Phase 1C + 1D + 1E)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`/`inventoryItems`/`stock`/`inventoryMovements`: shared helpers (`isActiveMember`, `hasCapability`, `hasBranchAccess`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. The `companies` update rule checks `hasCapability(companyId, 'company.update' | 'company.suspend')`, a hand-maintained rules-side mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` (rules can't import TypeScript, so the two are kept in sync manually — see the comment in `firestore.rules`). `stock`/`inventoryMovements` reads additionally require the caller's `branchIds` to include the document's `branchId` (empty `branchIds` = all branches) — the first real use of the branch-scoping promised back in 1C. `isSuperAdmin()` grants a cross-tenant read bypass on all of the above for the global `superAdmin` custom claim; it grants no write access anywhere. Every client write to these seven collections is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` (and, for stock/movements, `hasBranchAccess()`) before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4, `docs/phases/PHASE_1D_PLAN.md` §6, and `docs/phases/PHASE_1E_PLAN.md` §7.
+**Implemented (Phase 1C + 1D + 1E + 1F)**, in `firestore.rules`, for `users`/`companies`/`branches`/`memberships`/`inventoryItems`/`stock`/`inventoryMovements`/`orders`/`orders/lines`: shared helpers (`isActiveMember`, `hasCapability`, `hasBranchAccess`, `isSuperAdmin`, etc.) reading `companies/{companyId}/memberships/{request.auth.uid}`, implemented once and reused across every match block. The `companies` update rule checks `hasCapability(companyId, 'company.update' | 'company.suspend')`, a hand-maintained rules-side mirror of `core/roles-permissions/matrix.ts`'s `ROLE_CAPABILITIES` (rules can't import TypeScript, so the two are kept in sync manually — see the comment in `firestore.rules`). `stock`/`inventoryMovements`/`orders`/`orders/lines` reads additionally require the caller's `branchIds` to include the document's `branchId` (empty `branchIds` = all branches) — order lines carry their own denormalized `branchId` so this never needs a parent-order lookup. `isSuperAdmin()` grants a cross-tenant read bypass on all of the above for the global `superAdmin` custom claim; it grants no write access anywhere. Every client write to these nine collections is denied outright (`allow write: if false`); all mutation goes through server code using the Admin SDK, gated by `requireCapability()` (and, for branch-scoped collections, `hasBranchAccess()`) before it ever reaches Firestore. Full rationale in `docs/phases/PHASE_1C_PLAN.md` §4, `docs/phases/PHASE_1D_PLAN.md` §6, `docs/phases/PHASE_1E_PLAN.md` §7, and `docs/phases/PHASE_1F_PLAN.md` §7.
 
-Note this **supersedes** the originally-sketched aspirational shape (a generic `hasCapability(companyId, '<collection>.write')` direct-client-write rule per collection) — `ARCHITECTURE.md` §6 is explicit that inventory adjustments go through server-side logic, not rule-gated direct writes, and the transfer/receive/waste transactions' cross-document atomicity couldn't be expressed safely as a rules-only invariant regardless. The Order Engine (1F) is expected to follow the same Admin-SDK-only pattern for the same reason.
+Note this **supersedes** the originally-sketched aspirational shape (a generic `hasCapability(companyId, '<collection>.write')` direct-client-write rule per collection) — `ARCHITECTURE.md` §6 is explicit that inventory adjustments and order status changes go through server-side logic, not rule-gated direct writes, and the multi-document atomicity these transactions need (an order's status change plus every line's stock deduction, in one commit) couldn't be expressed safely as a rules-only invariant regardless.

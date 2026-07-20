@@ -167,7 +167,7 @@ describe.skipIf(!IS_EMULATOR)("inventory-engine stock transactions (Firestore Em
     requireSessionMock.mockResolvedValue({ uid, email: null, superAdmin: false });
 
     const { receiveStock } = await import("./stock");
-    const { BranchAccessDeniedError } = await import("../domain/errors");
+    const { BranchAccessDeniedError } = await import("@/core/companies/errors");
 
     await expect(receiveStock(companyId, "branch-1", itemId, 5)).rejects.toThrow(BranchAccessDeniedError);
   });

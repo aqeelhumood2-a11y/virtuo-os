@@ -12,4 +12,8 @@ export type Capability =
   | "membership.updateRole"
   | "membership.deactivate"
   | "inventory.view"
-  | "inventory.write";
+  | "inventory.write"
+  | "orders.view"
+  | "orders.create"
+  | "orders.complete"
+  | "orders.void";

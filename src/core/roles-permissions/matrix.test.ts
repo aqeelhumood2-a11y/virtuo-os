@@ -15,9 +15,13 @@ describe("ROLE_CAPABILITIES", () => {
         "membership.deactivate",
         "inventory.view",
         "inventory.write",
+        "orders.view",
+        "orders.create",
+        "orders.complete",
+        "orders.void",
       ]),
     );
-    expect(ROLE_CAPABILITIES.Owner).toHaveLength(9);
+    expect(ROLE_CAPABILITIES.Owner).toHaveLength(13);
   });
 
   it("grants Manager everything except membership.updateRole and company.suspend", () => {
@@ -32,16 +36,30 @@ describe("ROLE_CAPABILITIES", () => {
         "membership.deactivate",
         "inventory.view",
         "inventory.write",
+        "orders.view",
+        "orders.create",
+        "orders.complete",
+        "orders.void",
       ]),
     );
   });
 
-  it("grants Supervisor and Employee view-only capabilities, including inventory.view but not inventory.write", () => {
-    const viewOnly = ["company.view", "branch.view", "membership.view", "inventory.view"];
-    expect(ROLE_CAPABILITIES.Supervisor.sort()).toEqual(viewOnly.sort());
-    expect(ROLE_CAPABILITIES.Employee.sort()).toEqual(viewOnly.sort());
+  it("grants Supervisor and Employee view + frontline order capabilities, but not inventory.write or orders.void", () => {
+    const frontline = [
+      "company.view",
+      "branch.view",
+      "membership.view",
+      "inventory.view",
+      "orders.view",
+      "orders.create",
+      "orders.complete",
+    ];
+    expect(ROLE_CAPABILITIES.Supervisor.sort()).toEqual(frontline.sort());
+    expect(ROLE_CAPABILITIES.Employee.sort()).toEqual(frontline.sort());
     expect(ROLE_CAPABILITIES.Supervisor).not.toContain("inventory.write");
     expect(ROLE_CAPABILITIES.Employee).not.toContain("inventory.write");
+    expect(ROLE_CAPABILITIES.Supervisor).not.toContain("orders.void");
+    expect(ROLE_CAPABILITIES.Employee).not.toContain("orders.void");
   });
 });
 

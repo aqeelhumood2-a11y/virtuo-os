@@ -10,9 +10,26 @@ const ALL_CAPABILITIES: Capability[] = [
   "membership.deactivate",
   "inventory.view",
   "inventory.write",
+  "orders.view",
+  "orders.create",
+  "orders.complete",
+  "orders.void",
 ];
 
-const VIEW_ONLY: Capability[] = ["company.view", "branch.view", "membership.view", "inventory.view"];
+const VIEW_ONLY: Capability[] = [
+  "company.view",
+  "branch.view",
+  "membership.view",
+  "inventory.view",
+  "orders.view",
+];
+
+// Supervisor/Employee get frontline order-taking on top of view-only --
+// creating and completing an order is day-to-day work (ringing up a sale),
+// unlike orders.void, which stays Owner/Manager-only (ARCHITECTURE.md §5
+// singles out orders.void as its own capability, matching the real-world
+// pattern of voids needing manager approval).
+const FRONTLINE: Capability[] = [...VIEW_ONLY, "orders.create", "orders.complete"];
 
 // The single source of truth for "who can do what" (ARCHITECTURE.md §4/§6).
 // firestore.rules mirrors the two capabilities it needs to check directly
@@ -25,8 +42,8 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   Manager: ALL_CAPABILITIES.filter(
     (capability) => capability !== "membership.updateRole" && capability !== "company.suspend",
   ),
-  Supervisor: VIEW_ONLY,
-  Employee: VIEW_ONLY,
+  Supervisor: FRONTLINE,
+  Employee: FRONTLINE,
 };
 
 // Fixed hierarchy per ARCHITECTURE.md §5: SuperAdmin > Owner > Manager >

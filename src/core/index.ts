@@ -1,6 +1,6 @@
 // Core platform public barrel. Auth (1B), the Multi-Tenant Organization
-// Model (1C), Roles & Permissions (1D), and the Inventory Engine (1E) are
-// implemented so far. The Order Engine, Audit Logs, and Notifications
+// Model (1C), Roles & Permissions (1D), the Inventory Engine (1E), and the
+// Order Engine (1F) are implemented so far. Audit Logs and Notifications
 // remain reserved for later phases.
 export {
   signUpAction,
@@ -12,6 +12,7 @@ export { getSession, requireSession } from "./auth/session";
 export type { AuthFormState, AuthSession } from "./auth/types";
 
 export { createCompanyAction } from "./companies/actions";
+export { BranchAccessDeniedError } from "./companies/errors";
 export { deactivateMemberAction, updateMemberRoleAction } from "./companies/members-actions";
 export { AlreadyOnboardedError, runOnboardingTransaction } from "./companies/onboarding";
 export {
@@ -39,7 +40,8 @@ export type { Capability, Role } from "./roles-permissions/types";
 
 export {
   adjustStock,
-  BranchAccessDeniedError,
+  applyStockChangeInTransaction,
+  commitStockChangePlan,
   createItem,
   deactivateItem,
   getItem,
@@ -49,6 +51,7 @@ export {
   listItems,
   listMovementsForBranch,
   listStockForBranch,
+  planStockChange,
   receiveStock,
   recordStockCount,
   transferStock,
@@ -56,13 +59,32 @@ export {
   wasteStock,
 } from "./inventory-engine";
 export type {
+  ApplyStockChangeParams,
   CreateItemInput,
   InventoryItem,
   InventoryMovement,
   MovementType,
   Stock,
+  StockChangePlan,
   UpdateItemInput,
 } from "./inventory-engine";
+
+export {
+  addOrderLine,
+  canTransition,
+  completeOrder,
+  computeLineTotal,
+  computeTotals,
+  createOrder,
+  getOrder,
+  InvalidOrderTransitionError,
+  listOrderLines,
+  listOrdersForBranch,
+  OrderNotEditableError,
+  OrderNotFoundError,
+  voidOrder,
+} from "./order-engine";
+export type { CreateOrderInput, Order, OrderLine, OrderLineInput, OrderStatus, OrderTotals } from "./order-engine";
 
 export { updateDisplayNameAction } from "./users/actions";
 export { getUserProfile } from "./users/profile";

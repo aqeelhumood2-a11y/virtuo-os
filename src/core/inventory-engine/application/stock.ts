@@ -1,14 +1,15 @@
 import "server-only";
 
-import { FieldValue, type Transaction } from "firebase-admin/firestore";
+import { FieldValue, type DocumentReference, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { BranchAccessDeniedError } from "@/core/companies/errors";
 import { hasBranchAccess } from "@/core/companies/membership";
 import type { CompanyMembershipContext } from "@/core/companies/membership";
 import { requireCapability } from "@/core/roles-permissions";
 import type { Capability } from "@/core/roles-permissions";
 
-import { BranchAccessDeniedError, ItemNotFoundError } from "../domain/errors";
+import { ItemNotFoundError } from "../domain/errors";
 import { assertSufficientStock, computeCountDelta } from "../domain/stock-math";
 import type { InventoryMovement, MovementType, Stock } from "../domain/types";
 import {
@@ -56,7 +57,7 @@ export async function listMovementsForBranch(companyId: string, branchId: string
   return snap.docs.map((doc) => toMovement(doc.id, doc.data()));
 }
 
-type ApplyStockChangeParams = {
+export type ApplyStockChangeParams = {
   companyId: string;
   branchId: string;
   itemId: string;
@@ -70,55 +71,111 @@ type ApplyStockChangeParams = {
   computeDelta: (quantityOnHand: number) => number;
 };
 
-async function applyStockChange(params: ApplyStockChangeParams): Promise<void> {
+export type StockChangePlan = {
+  stockRef: DocumentReference;
+  movementRef: DocumentReference;
+  branchId: string;
+  itemId: string;
+  quantityOnHand: number;
+  reorderPoint: number;
+  type: MovementType;
+  quantityDelta: number;
+  itemNameSnapshot: string;
+  reason: string;
+  performedBy: string;
+};
+
+// Read-and-validate phase, split from the write phase below, specifically
+// so a caller can plan *multiple* items' stock changes -- reading and
+// validating every one of them -- before writing any of them. Firestore
+// transactions require all reads to happen before all writes; a caller
+// that read-then-wrote one item at a time (as order-engine's
+// completeOrder() must, across every line in one order) would violate
+// that as soon as it moved to a second item. Returns null for a no-op
+// (zero) delta, same as the single-item path used to short-circuit on.
+export async function planStockChange(
+  transaction: Transaction,
+  params: ApplyStockChangeParams,
+): Promise<StockChangePlan | null> {
   const { companyId, branchId, itemId, type, reason, performedBy, computeDelta } = params;
 
   const itemRef = itemDoc(companyId, itemId);
   const stockRef = stockDoc(companyId, branchId, itemId);
-  const movementRef = movementsCollection(companyId).doc();
 
-  await adminDb.runTransaction(async (transaction: Transaction) => {
-    // Sequential, not Promise.all -- reading multiple docs concurrently
-    // inside a transaction was observed to break the SDK's read-set
-    // tracking against the emulator (the optimistic-concurrency conflict
-    // that should force a retry on concurrent writers silently didn't
-    // fire, losing an update). Matches onboarding.ts's proven sequential
-    // read pattern.
-    const itemSnap = await transaction.get(itemRef);
-    if (!itemSnap.exists) throw new ItemNotFoundError();
-    const stockSnap = await transaction.get(stockRef);
+  // Sequential, not Promise.all -- reading multiple docs concurrently
+  // inside a transaction was observed to break the SDK's read-set tracking
+  // against the emulator (the optimistic-concurrency conflict that should
+  // force a retry on concurrent writers silently didn't fire, losing an
+  // update). Matches onboarding.ts's proven sequential read pattern.
+  const itemSnap = await transaction.get(itemRef);
+  if (!itemSnap.exists) throw new ItemNotFoundError();
+  const stockSnap = await transaction.get(stockRef);
 
-    const currentQuantity: number = stockSnap.exists ? (stockSnap.data()?.quantityOnHand ?? 0) : 0;
-    const quantityDelta = computeDelta(currentQuantity);
-    if (quantityDelta === 0) return;
+  const currentQuantity: number = stockSnap.exists ? (stockSnap.data()?.quantityOnHand ?? 0) : 0;
+  const quantityDelta = computeDelta(currentQuantity);
+  if (quantityDelta === 0) return null;
 
-    assertSufficientStock(currentQuantity, quantityDelta);
+  assertSufficientStock(currentQuantity, quantityDelta);
 
-    const now = FieldValue.serverTimestamp();
+  return {
+    stockRef,
+    movementRef: movementsCollection(companyId).doc(),
+    branchId,
+    itemId,
+    quantityOnHand: currentQuantity + quantityDelta,
+    reorderPoint: stockSnap.exists ? (stockSnap.data()?.reorderPoint ?? 0) : 0,
+    type,
+    quantityDelta,
+    itemNameSnapshot: itemSnap.data()?.name ?? itemId,
+    reason,
+    performedBy,
+  };
+}
 
-    transaction.set(
-      stockRef,
-      {
-        branchId,
-        itemId,
-        quantityOnHand: currentQuantity + quantityDelta,
-        reorderPoint: stockSnap.exists ? (stockSnap.data()?.reorderPoint ?? 0) : 0,
-        updatedAt: now,
-      },
-      { merge: true },
-    );
+// Write phase -- call only after every plan() this transaction needs has
+// already been produced, so all reads precede all writes.
+export function commitStockChangePlan(transaction: Transaction, plan: StockChangePlan): void {
+  const now = FieldValue.serverTimestamp();
 
-    transaction.set(movementRef, {
-      itemId,
-      branchId,
-      type,
-      quantityDelta,
-      itemNameSnapshot: itemSnap.data()?.name ?? itemId,
-      reason,
-      performedBy,
-      createdAt: now,
-    });
+  transaction.set(
+    plan.stockRef,
+    {
+      branchId: plan.branchId,
+      itemId: plan.itemId,
+      quantityOnHand: plan.quantityOnHand,
+      reorderPoint: plan.reorderPoint,
+      updatedAt: now,
+    },
+    { merge: true },
+  );
+
+  transaction.set(plan.movementRef, {
+    itemId: plan.itemId,
+    branchId: plan.branchId,
+    type: plan.type,
+    quantityDelta: plan.quantityDelta,
+    itemNameSnapshot: plan.itemNameSnapshot,
+    reason: plan.reason,
+    performedBy: plan.performedBy,
+    createdAt: now,
   });
+}
+
+// The transaction-composable primitive for a *single* item, taking an
+// already-open Transaction rather than opening its own -- this is what
+// lets a caller with only one item to change (this module's own public
+// functions below) compose into a larger transaction without needing the
+// two-phase plan/commit split themselves.
+export async function applyStockChangeInTransaction(
+  transaction: Transaction,
+  params: ApplyStockChangeParams,
+): Promise<void> {
+  const plan = await planStockChange(transaction, params);
+  if (plan) commitStockChangePlan(transaction, plan);
+}
+
+async function applyStockChange(params: ApplyStockChangeParams): Promise<void> {
+  await adminDb.runTransaction((transaction: Transaction) => applyStockChangeInTransaction(transaction, params));
 }
 
 export async function receiveStock(

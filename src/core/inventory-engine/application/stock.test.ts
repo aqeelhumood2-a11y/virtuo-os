@@ -66,7 +66,7 @@ describe("branch-access enforcement (shared across all mutations)", () => {
   it("denies when the actor's branchIds does not include the target branch", async () => {
     hasBranchAccessMock.mockReturnValue(false);
     const { receiveStock } = await import("./stock");
-    const { BranchAccessDeniedError } = await import("../domain/errors");
+    const { BranchAccessDeniedError } = await import("@/core/companies/errors");
 
     await expect(receiveStock("company-1", "branch-2", "item-1", 5)).rejects.toThrow(BranchAccessDeniedError);
     expect(stockSetMock).not.toHaveBeenCalled();
@@ -172,7 +172,7 @@ describe("transferStock", () => {
       (_membership: unknown, branchId: string) => branchId === "branch-1",
     );
     const { transferStock } = await import("./stock");
-    const { BranchAccessDeniedError } = await import("../domain/errors");
+    const { BranchAccessDeniedError } = await import("@/core/companies/errors");
 
     await expect(transferStock("company-1", "branch-1", "branch-2", "item-1", 5)).rejects.toThrow(
       BranchAccessDeniedError,

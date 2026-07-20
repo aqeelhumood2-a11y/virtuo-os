@@ -5,13 +5,6 @@ export class InsufficientStockError extends Error {
   }
 }
 
-export class BranchAccessDeniedError extends Error {
-  constructor() {
-    super("You do not have access to this branch.");
-    this.name = "BranchAccessDeniedError";
-  }
-}
-
 export class ItemNotFoundError extends Error {
   constructor() {
     super("Inventory item not found.");
