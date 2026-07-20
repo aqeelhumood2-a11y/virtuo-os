@@ -1,6 +1,8 @@
 # Phase 1B — Authentication & Sessions: Implementation Plan
 
-Status: **BLOCKED — conditionally approved, but implementation cannot start.** Verified against the real `virtuo-os` project via the Admin SDK (`adminAuth.listUsers()`): Firebase Authentication returns `auth/configuration-not-found`, meaning it has not been enabled in the Firebase Console yet. Per explicit instruction, implementation stops here — no workaround will be attempted. Once you've clicked "Get started" under Authentication in the Firebase Console and enabled the Email/Password provider, tell me and I'll re-verify and proceed.
+Status: **Implemented and verified against the live `virtuo-os` project.** The `adminAuth.listUsers()` re-check succeeded once Firebase Authentication was enabled in the Console; implementation proceeded per this plan and its amendments. See the commit for the final diff.
+
+**One design change made during implementation, found by real manual verification (not by the automated test suite):** the original `proxy.ts` design redirected `/login` → `/account` whenever a session cookie was merely *present*. A present-but-invalid cookie (expired/revoked/tampered) caused an infinite redirect loop against `account/page.tsx`'s authoritative `requireSession()`, which redirects the same request back to `/login` because the cookie doesn't verify. Fixed by removing that direction from Proxy entirely and instead having `login`/`register` pages call the authoritative `getSession()` themselves (a read-only call, legal in a Server Component) to decide whether to redirect an already-signed-in user to `/account`. Proxy now only ever performs the loop-safe direction (no cookie → redirect to `/login`). Documented in `src/proxy.ts` and covered by an updated `proxy.test.ts` case.
 
 ## Amendments required at conditional approval (incorporated into this plan; code not yet written)
 

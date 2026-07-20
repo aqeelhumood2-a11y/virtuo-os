@@ -1,7 +1,10 @@
 # Core
 
-Reserved for the permanent, business-agnostic platform: Auth, Users, Companies, Branches, Roles & Permissions, the Inventory Engine, the Order Engine, Audit Logs, and Notifications.
+The permanent, business-agnostic platform.
 
-Populated starting Phase 1B. Empty in Phase 1A (Foundation) by design — see `docs/ROADMAP.md` and `docs/phases/PHASE_1A_PLAN.md`.
+**Implemented:**
+- `auth` (Phase 1B) — Firebase Authentication (email/password), server-side session cookies, CSRF protection, basic rate limiting. Produces only a verified Firebase Auth UID + session; no Firestore data.
+
+**Reserved for later phases:** Users, Companies, Branches, Roles & Permissions, the Inventory Engine, the Order Engine, Audit Logs, and Notifications — see `docs/ROADMAP.md`.
 
 Import-boundary rule: Core must never import from `src/apps` or `src/connectors`.
