@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 
 import { RestaurantAppRoot } from "@/apps/restaurant/routes/RestaurantAppRoot";
+import { RetailAppRoot } from "@/apps/retail/routes/RetailAppRoot";
 
 export type AppRootProps = { companyId: string; slug?: string[] };
 
@@ -13,4 +14,5 @@ export type AppRootProps = { companyId: string; slug?: string[] };
 // is added the same way, one new entry, no change to App Registry itself.
 export const APP_ROOT_COMPONENTS: Partial<Record<string, ComponentType<AppRootProps>>> = {
   restaurant: RestaurantAppRoot,
+  retail: RetailAppRoot,
 };

@@ -81,8 +81,10 @@ Implementation does not begin on 1A until explicitly approved. Each subsequent s
 **Milestone 3:** End-to-end flow — start an order, add/adjust/remove items, complete or void it, see it in history — for Restaurant, with the Order/Inventory Engines requiring no vertical-specific changes (only the generic idempotency and line-mutation capabilities every future vertical will also need).
 
 ## Phase 4 — Second Vertical + Loyalty
-4.1 Second vertical app.
-4.2 Loyalty app: points/rewards, subscribing to Order Engine events — proves Apps can react to Core events without Core knowing Loyalty exists.
+
+**4.1 (implemented; see `docs/phases/PHASE_4_PLAN.md`) Second vertical app: Retail** -- a cart/checkout App built entirely on Core's existing Order and Inventory Engines, reusing Phase 3's `createOrder` idempotency mechanism directly. Payment/tender is out of scope, so Retail owns no data Core doesn't already model -- no App-owned Firestore collection, no App-specific audit action, and (unlike Restaurant) no repair path, since there is no second write to ever fall out of sync with Core's own. Proves the architecture needs zero further Core changes for a second vertical.
+
+**4.2 (not yet implemented) Loyalty app:** points/rewards, subscribing to Order Engine events — proves Apps can react to Core events without Core knowing Loyalty exists. Decided approach (not yet built): Loyalty reads Core's existing `auditLogs` for `order.completed` entries as its event feed -- no new Core event/pub-sub mechanism, reusing the audit trail Phase 1G already writes atomically with every order completion.
 
 **Milestone 4:** Two verticals live sharing Core engines with zero duplicated logic; Loyalty auto-accrues from real orders.
 
