@@ -251,6 +251,25 @@ describe("architecture import boundaries", () => {
     expect(restrictedPathErrors(result)).not.toHaveLength(0);
   });
 
+  // --- Phase 4.2: Loyalty App -- same domain-specific pins for the third
+  // App, confirming the blanket zone fires for it too.
+
+  it("forbids the Loyalty App importing from Platform", async () => {
+    const result = await lintAsFile(
+      "src/apps/loyalty/__boundary_fixture__.ts",
+      `import "../../platform";\nexport {};\n`,
+    );
+    expect(restrictedPathErrors(result)).not.toHaveLength(0);
+  });
+
+  it("forbids the Loyalty App importing from Connectors", async () => {
+    const result = await lintAsFile(
+      "src/apps/loyalty/__boundary_fixture__.ts",
+      `import "../../connectors";\nexport {};\n`,
+    );
+    expect(restrictedPathErrors(result)).not.toHaveLength(0);
+  });
+
   it("allows Settings importing from Core, Platform, and App Registry (negative control)", async () => {
     const coreResult = await lintAsFile(
       "src/settings/__boundary_fixture_valid_core__.ts",

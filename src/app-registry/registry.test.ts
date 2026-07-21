@@ -4,8 +4,8 @@ import { getAppManifest, getRegisteredApps, registerApp } from "./registry";
 import type { AppManifest } from "./app-manifest.types";
 
 describe("app-registry registry", () => {
-  it("has exactly Restaurant (Phase 3) and Retail (Phase 4) registered", () => {
-    expect(getRegisteredApps().map((manifest) => manifest.id).sort()).toEqual(["restaurant", "retail"]);
+  it("has exactly Restaurant (Phase 3), Retail (Phase 4.1), and Loyalty (Phase 4.2) registered", () => {
+    expect(getRegisteredApps().map((manifest) => manifest.id).sort()).toEqual(["loyalty", "restaurant", "retail"]);
   });
 
   it("returns null for an unregistered app id", () => {

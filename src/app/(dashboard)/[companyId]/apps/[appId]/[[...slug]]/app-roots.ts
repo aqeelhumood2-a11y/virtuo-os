@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 
 import { RestaurantAppRoot } from "@/apps/restaurant/routes/RestaurantAppRoot";
 import { RetailAppRoot } from "@/apps/retail/routes/RetailAppRoot";
+import { LoyaltyAppRoot } from "@/apps/loyalty/routes/LoyaltyAppRoot";
 
 export type AppRootProps = { companyId: string; slug?: string[] };
 
@@ -15,4 +16,5 @@ export type AppRootProps = { companyId: string; slug?: string[] };
 export const APP_ROOT_COMPONENTS: Partial<Record<string, ComponentType<AppRootProps>>> = {
   restaurant: RestaurantAppRoot,
   retail: RetailAppRoot,
+  loyalty: LoyaltyAppRoot,
 };
