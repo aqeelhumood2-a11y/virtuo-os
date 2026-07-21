@@ -286,6 +286,31 @@ service cloud.firestore {
           allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
           allow write: if false;
         }
+
+        // --- Loyalty App (4.2) -------------------------------------------
+        // Company-wide, not branch-scoped -- a member and their points
+        // ledger aren't tied to one branch (unlike Restaurant's orderMeta
+        // above). Same low-sensitivity visibility tier as apps/connectors:
+        // any active member can read, every write goes through
+        // loyalty.service.ts (Admin SDK only).
+        match /members/{memberId} {
+          allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
+        match /ledger/{ledgerEntryId} {
+          allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
+        match /attributions/{orderId} {
+          allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
+        // Internal sync bookkeeping only -- never read by a client, same
+        // tier as Core's own idempotencyKeys (Phase 3).
+        match /syncCursor/{docId} {
+          allow read: if isSuperAdmin();
+          allow write: if false;
+        }
       }
 
       // Connection state only -- credentials are never stored here, only

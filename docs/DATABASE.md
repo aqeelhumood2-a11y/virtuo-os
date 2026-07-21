@@ -133,10 +133,37 @@ companies/{companyId}/apps/restaurant/orderMeta/{draftId}
 # and its lines subcollection above); Core's own idempotencyKeys mechanism
 # (Phase 3) is reused as-is for duplicate-checkout protection.
 
+# --- Loyalty (Phase 4.2, implemented; see docs/phases/PHASE_4_2_PLAN.md) ---
+companies/{companyId}/apps/loyalty/members/{memberId}
+  name, contactRef, pointsBalance, createdAt
+  # Loyalty's own customer-identity concept -- Core has no "customer" model
+  # at all. Not tied to Firebase Auth; no member login exists (staff-only
+  # tooling, no customer-facing portal).
+
+companies/{companyId}/apps/loyalty/ledger/{ledgerEntryId}
+  memberId, type: "earned" | "adjusted" (adjusted reserved, unused this phase),
+  points (signed), orderId? (set for type="earned"), reason?, actorId, createdAt
+  # Append-only, mirroring inventoryMovements/auditLogs. pointsBalance on
+  # `members` is denormalized and updated transactionally alongside every
+  # append, the same stock.quantityOnHand + inventoryMovements pattern.
+
+companies/{companyId}/apps/loyalty/attributions/{orderId}
+  memberId, attributedBy, createdAt
+  # Keyed by Core's own orderId -- the manual, staff-driven link between a
+  # completed order and the member it accrues for. Deliberately decoupled
+  # from Restaurant's and Retail's own checkout flows (neither is modified);
+  # populated by its own separate staff action any time after checkout.
+
+companies/{companyId}/apps/loyalty/syncCursor/default
+  lastProcessedLogId, lastSyncedAt
+  # Internal bookkeeping only, never read by a client (same tier as Core's
+  # own idempotencyKeys) -- tracks how far back into Core's own auditLogs
+  # syncAccruals has already scanned. Purely a scan-efficiency optimization,
+  # never a correctness dependency (each ledger append is independently
+  # idempotency-guarded by orderId).
+
 # --- Future verticals (not yet implemented) ---
 companies/{companyId}/apps/kitchenDisplay/tickets/{ticketId}
-companies/{companyId}/apps/loyalty/programs/{programId}
-companies/{companyId}/apps/loyalty/members/{memberId}
 companies/{companyId}/apps/barcode/scanLogs/{scanId}
 ```
 
