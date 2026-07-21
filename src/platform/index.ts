@@ -16,19 +16,24 @@ export type { AppInstallAuditAction, AppInstallCapability, InstalledApp } from "
 
 export { getConnectorConnection, listCompanyConnectors } from "./connector-connections/connector-connection.repository";
 export {
+  ConnectorNotConnectedError,
   ConnectorNotEntitledError,
   ConnectorNotRegisteredError,
   connectConnector,
   disconnectConnector,
   handleWebhook,
+  syncConnector,
 } from "./connector-connections/connector-connection.service";
 export type {
   ConnectorCapability,
   ConnectorConnection,
   ConnectorConnectionAuditAction,
   ConnectorConnectionStatus,
+  ConnectorSyncSummary,
 } from "./connector-connections/connector-connection.types";
-export { getRegisteredConnectors } from "./connector-connections";
+export { listProductMappings } from "./connector-connections/product-mapping.repository";
+export type { ProductMapping } from "./connector-connections/product-mapping.repository";
+export { ConnectorAuthError, getRegisteredConnectors } from "./connector-connections";
 export type { ConnectorContract } from "./connector-connections";
 
 export { hasPlatformCapability, requirePlatformCapability } from "./shared/require-platform-capability";

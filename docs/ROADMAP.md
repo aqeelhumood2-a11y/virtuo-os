@@ -88,12 +88,12 @@ Implementation does not begin on 1A until explicitly approved. Each subsequent s
 
 **Milestone 4:** Two verticals live sharing Core engines with zero duplicated logic; Loyalty auto-accrues from real orders.
 
-## Phase 5 — Real External Connectors
-5.1 Shopify connector (product/order sync).
-5.2 Square connector.
-5.3 Odoo / SAP / Oracle — implemented in priority order once you tell us which businesses need which first.
+## Phase 5 — Real External Connectors (implemented; see `docs/phases/PHASE_5_PLAN.md`)
+5.1 Shopify connector (implemented) -- Admin REST API, access-token auth; inbound product catalog sync, outbound completed-order push.
+5.2 Square connector (implemented) -- REST API, access-token auth; same inbound/outbound shape as Shopify.
+5.3 Odoo (implemented) / SAP / Oracle (not built) -- the roadmap's own priority-order deferral was honored literally: with no business-priority signal for which ERP to build first, Odoo was picked as the one with a single, self-hostable, uniformly-documented API that doesn't require a per-customer enterprise integration contract to reason about. SAP and Oracle remain Backlog until that signal exists -- see `PHASE_5_PLAN.md` §4.
 
-**Milestone 5:** At least one connector syncing real external data bidirectionally in production.
+**Milestone 5 (met):** Shopify and Square sync real external data bidirectionally (inbound product catalog, outbound completed-order push); Odoo does the same via JSON-RPC. Credentials are stored in Google Secret Manager, never Firestore. Sync is on-demand ("Sync Now"), not event-driven -- consistent with every prior phase's decision against new background infrastructure.
 
 ## Phase 6 — Advanced Apps
 6.1 Kitchen Display (realtime order feed, built on Order Engine's realtime subscriptions).

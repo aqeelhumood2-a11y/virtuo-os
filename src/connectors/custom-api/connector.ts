@@ -15,6 +15,8 @@ export const customApiConnector: ConnectorContract = {
   async disconnect() {},
 
   async sync() {
+    // The stub has no external system to reach -- it never discovers
+    // products and never pushes any of the outboundOrders it's handed.
     return { syncedAt: new Date().toISOString() };
   },
 
