@@ -77,7 +77,7 @@ Unit tests (mocked `@/core`) for `sale.service.ts` and `actions.ts`. Emulator te
 - Phase 4.2 Loyalty app.
 - Payment/tender recording for Retail.
 - A branch switcher for Retail's history/pending-sales views (currently scoped to the first branch).
-- A known, pre-existing limitation observed (not introduced or fixed this phase, and Restaurant's code was not touched per this phase's explicit instructions): `apps/restaurant`'s `listOrderHistory` does not pre-filter by branch before calling Core's `getOrder`, so a branch-scoped member (non-empty `branchIds`) would hit a thrown `BranchAccessDeniedError` instead of a filtered list if any history entry belongs to a branch outside their scope. Flagged here for a future bug-fix phase; Retail's own `listSaleHistory` does not have this issue, since it queries Core's already branch-scoped `listOrdersForBranch` directly rather than joining across an App-owned collection.
+- A known, pre-existing limitation observed (not introduced or fixed this phase, and Restaurant's code was not touched per this phase's explicit instructions): `apps/restaurant`'s `listOrderHistory` does not pre-filter by branch before calling Core's `getOrder`, so a branch-scoped member (non-empty `branchIds`) would hit a thrown `BranchAccessDeniedError` instead of a filtered list if any history entry belongs to a branch outside their scope. Retail's own `listSaleHistory` does not have this issue, since it queries Core's already branch-scoped `listOrdersForBranch` directly rather than joining across an App-owned collection. **Tracked as [issue #2](https://github.com/aqeelhumood2-a11y/virtuo-os/issues/2)** for a future bug-fix phase.
 
 ## 15. Estimated Files (actual)
 
