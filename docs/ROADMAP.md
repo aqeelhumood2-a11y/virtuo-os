@@ -71,13 +71,14 @@ Implementation does not begin on 1A until explicitly approved. Each subsequent s
 
 **Milestone 2:** Super Admin can toggle an App on/off for a company and see it appear/disappear live; a stub connector can be configured and shows a connected status. Still no real vertical business logic — this phase proves the *platform*, not a product.
 
-## Phase 3 — First Vertical App
-3.0 **Decide which vertical goes first** (Retail / Restaurant / Coffee Shop / Warehouse / other) — your call, made with the full Core and App infrastructure already in hand.
-3.1 Build the chosen vertical's manifest + domain glue.
-3.2 Vertical UI wired to Order Engine (create/void orders) and Inventory Engine (stock deduction on sale) — zero new business logic duplicated outside the vertical's own UI layer.
-3.3 Vertical-specific screens.
+## Phase 3 — First Vertical App (implemented; see `docs/phases/PHASE_3_PLAN.md`)
+3.0 **Restaurant / Food & Beverage (counter-service POS)** chosen as the first vertical -- builds directly on the existing Order and Inventory Engines, and serves as the reference implementation future verticals (Retail, Coffee Shop, Warehouse, Pharmacy, Salon) copy.
+3.1 `src/apps/restaurant`: manifest + domain glue (order type, table/reference, guest count, kitchen note -- fields Core structurally cannot own).
+3.2 Counter-service UI wired directly to Core's Order Engine (create/add-line/update-quantity/remove-line/complete/void) and Inventory Engine (menu items as `InventoryItem` references) -- zero business logic duplicated outside the App's own layer.
+3.3 Screens: menu/branch/order-type selection, ticket (lines, totals, complete/void), order history.
+3.4 Two small, necessary Core additions this phase required: a generic, business-agnostic idempotency-key mechanism on `createOrder` (exactly-once order creation under concurrent/duplicate requests, reusable by any future Core mutation) and `updateOrderLineQuantity`/`removeOrderLine` on the Order Engine (the approved scope required them; only `addOrderLine` existed before). A one-field, UI-independent addition to App Registry (`AppManifest.routeKey: string`) and a small additive Core read (`listBranches`) round out the touch-points -- everything else built entirely inside `src/apps/restaurant`.
 
-**Milestone 3:** End-to-end flow — create a product, sell it through the vertical's UI, stock decrements, order is recorded, everything audit-logged — for exactly one industry, proving the Core engines needed no changes to support it.
+**Milestone 3:** End-to-end flow — start an order, add/adjust/remove items, complete or void it, see it in history — for Restaurant, with the Order/Inventory Engines requiring no vertical-specific changes (only the generic idempotency and line-mutation capabilities every future vertical will also need).
 
 ## Phase 4 — Second Vertical + Loyalty
 4.1 Second vertical app.

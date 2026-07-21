@@ -78,7 +78,7 @@ describe.skipIf(!IS_EMULATOR)("platform/app-installs (Firestore Emulator)", () =
     await addMember(companyId, employeeUid, "Employee");
 
     const { registerApp } = await import("@/app-registry");
-    registerApp({ id: "restaurant", displayName: "Restaurant" });
+    registerApp({ id: "restaurant", displayName: "Restaurant", routeKey: "restaurant" });
 
     requireSessionMock.mockResolvedValue({ uid: ownerUid, email: null, superAdmin: false });
 
@@ -109,7 +109,7 @@ describe.skipIf(!IS_EMULATOR)("platform/app-installs (Firestore Emulator)", () =
     requireSessionMock.mockResolvedValue({ uid: ownerUid, email: null, superAdmin: false });
 
     const { registerApp } = await import("@/app-registry");
-    registerApp({ id: "retail", displayName: "Retail" });
+    registerApp({ id: "retail", displayName: "Retail", routeKey: "retail" });
 
     const { installApp, AppNotEntitledError } = await import("./app-install.service");
     const { isAppInstalled } = await import("./app-install.repository");
@@ -128,7 +128,7 @@ describe.skipIf(!IS_EMULATOR)("platform/app-installs (Firestore Emulator)", () =
     requireSessionMock.mockResolvedValue({ uid: ownerUid, email: null, superAdmin: false });
 
     const { registerApp } = await import("@/app-registry");
-    registerApp({ id: "restaurant", displayName: "Restaurant" });
+    registerApp({ id: "restaurant", displayName: "Restaurant", routeKey: "restaurant" });
 
     const { installApp, uninstallApp } = await import("./app-install.service");
     const { isAppInstalled } = await import("./app-install.repository");
@@ -150,7 +150,7 @@ describe.skipIf(!IS_EMULATOR)("platform/app-installs (Firestore Emulator)", () =
     await seedCompanyAndLicense(companyId, ownerUid, []); // not entitled to anything
 
     const { registerApp } = await import("@/app-registry");
-    registerApp({ id: "warehouse", displayName: "Warehouse" });
+    registerApp({ id: "warehouse", displayName: "Warehouse", routeKey: "warehouse" });
 
     requireSessionMock.mockResolvedValue({ uid: adminUid, email: null, superAdmin: true });
 

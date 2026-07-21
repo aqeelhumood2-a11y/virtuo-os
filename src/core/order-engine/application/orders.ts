@@ -12,11 +12,18 @@ import type { StockChangePlan } from "@/core/inventory-engine";
 import { requireCapability } from "@/core/roles-permissions";
 import type { Capability } from "@/core/roles-permissions";
 
-import { InvalidOrderTransitionError, OrderNotEditableError, OrderNotFoundError } from "../domain/errors";
+import {
+  InvalidOrderTransitionError,
+  OrderLineNotFoundError,
+  OrderNotEditableError,
+  OrderNotFoundError,
+} from "../domain/errors";
 import { computeLineTotal, computeTotals } from "../domain/pricing";
 import { canTransition } from "../domain/state-machine";
 import type { Order, OrderLine } from "../domain/types";
+import { idempotencyKeyDoc } from "../infrastructure/idempotency";
 import {
+  lineDoc,
   linesCollection,
   orderDoc,
   ordersCollection,
@@ -75,7 +82,19 @@ function assertValidLineInput(line: OrderLineInput): void {
   if (line.unitPrice < 0) throw new Error("Unit price cannot be negative.");
 }
 
-export async function createOrder(companyId: string, input: CreateOrderInput): Promise<Order> {
+// Optional idempotencyKey lets a caller guarantee that retrying (or
+// racing) the exact same logical request never creates a second order --
+// see docs/phases/PHASE_3_PLAN.md's idempotency/consistency model. Purely
+// additive: existing callers that omit it behave exactly as before.
+export type CreateOrderOptions = {
+  idempotencyKey?: string;
+};
+
+export async function createOrder(
+  companyId: string,
+  input: CreateOrderInput,
+  options?: CreateOrderOptions,
+): Promise<Order> {
   if (input.lines.length === 0) throw new Error("An order needs at least one line.");
   input.lines.forEach(assertValidLineInput);
 
@@ -85,8 +104,29 @@ export async function createOrder(companyId: string, input: CreateOrderInput): P
   const lineTotals = input.lines.map((line) => computeLineTotal(line.quantity, line.unitPrice));
   const totals = computeTotals({ lineTotals, tax: input.tax, discount: input.discount });
   const now = FieldValue.serverTimestamp();
+  const idempotencyRef = options?.idempotencyKey
+    ? idempotencyKeyDoc(companyId, options.idempotencyKey)
+    : null;
 
-  await adminDb.runTransaction(async (transaction: Transaction) => {
+  return adminDb.runTransaction(async (transaction: Transaction) => {
+    // Every read in this transaction must happen before any write -- so the
+    // idempotency check (and, on a hit, the existing order's own read)
+    // always runs first. Firestore transactions retry automatically on a
+    // conflicting concurrent write, which is what makes this exactly-once:
+    // if two callers race with the same idempotencyKey, only one commits
+    // the "create" branch below; the other is transparently re-run by the
+    // Admin SDK and, on retry, takes this "already exists" branch instead.
+    if (idempotencyRef) {
+      const existingKey = await transaction.get(idempotencyRef);
+      if (existingKey.exists) {
+        const existingOrderId = existingKey.data()!.resultId as string;
+        const existingOrderSnap = await transaction.get(orderDoc(companyId, existingOrderId));
+        if (existingOrderSnap.exists) {
+          return toOrder(existingOrderSnap.id, existingOrderSnap.data()!);
+        }
+      }
+    }
+
     transaction.set(orderRef, {
       branchId: input.branchId,
       appId: input.appId,
@@ -110,6 +150,14 @@ export async function createOrder(companyId: string, input: CreateOrderInput): P
       });
     });
 
+    if (idempotencyRef) {
+      transaction.set(idempotencyRef, {
+        operation: "createOrder",
+        resultId: orderRef.id,
+        createdAt: now,
+      });
+    }
+
     writeAuditInTransaction(transaction, {
       companyId,
       actorId: session.uid,
@@ -119,17 +167,17 @@ export async function createOrder(companyId: string, input: CreateOrderInput): P
       branchId: input.branchId,
       after: { status: "pending", total: totals.total },
     });
-  });
 
-  return {
-    id: orderRef.id,
-    branchId: input.branchId,
-    appId: input.appId,
-    status: "pending",
-    ...(input.customerRef ? { customerRef: input.customerRef } : {}),
-    totals,
-    createdBy: session.uid,
-  };
+    return {
+      id: orderRef.id,
+      branchId: input.branchId,
+      appId: input.appId,
+      status: "pending",
+      ...(input.customerRef ? { customerRef: input.customerRef } : {}),
+      totals,
+      createdBy: session.uid,
+    };
+  });
 }
 
 // Only ever valid on a pending order -- roadmap's "pending-order handling"
@@ -172,6 +220,101 @@ export async function addOrderLine(companyId: string, orderId: string, input: Or
       companyId,
       actorId: context.session.uid,
       action: "order.lineAdded",
+      targetType: "order",
+      targetId: orderId,
+      branchId: currentOrder.branchId,
+      before: { total: currentOrder.totals.total },
+      after: { total: totals.total },
+    });
+  });
+}
+
+// Same shape as addOrderLine: only valid on a pending order, re-reads
+// status and every line's total inside the transaction, recomputes totals
+// from scratch rather than patching them incrementally.
+export async function updateOrderLineQuantity(
+  companyId: string,
+  orderId: string,
+  lineId: string,
+  quantity: number,
+): Promise<void> {
+  if (quantity <= 0) throw new Error("Quantity must be positive.");
+  const { context } = await requireOrderAccess(companyId, orderId, "orders.create");
+
+  const orderRef = orderDoc(companyId, orderId);
+  const lineRef = lineDoc(companyId, orderId, lineId);
+
+  await adminDb.runTransaction(async (transaction: Transaction) => {
+    const orderSnap = await transaction.get(orderRef);
+    if (!orderSnap.exists) throw new OrderNotFoundError();
+    const currentOrder = toOrder(orderSnap.id, orderSnap.data()!);
+    if (currentOrder.status !== "pending") throw new OrderNotEditableError();
+
+    const lineSnap = await transaction.get(lineRef);
+    if (!lineSnap.exists) throw new OrderLineNotFoundError();
+    const currentLine = toOrderLine(lineSnap.id, lineSnap.data()!);
+
+    const linesSnap = await transaction.get(linesCollection(companyId, orderId));
+    const otherLineTotals = linesSnap.docs
+      .filter((doc) => doc.id !== lineId)
+      .map((doc) => doc.data().lineTotal as number);
+    const newLineTotal = computeLineTotal(quantity, currentLine.unitPrice);
+    const totals = computeTotals({
+      lineTotals: [...otherLineTotals, newLineTotal],
+      tax: currentOrder.totals.tax,
+      discount: currentOrder.totals.discount,
+    });
+
+    transaction.update(lineRef, { quantity, lineTotal: newLineTotal });
+    transaction.update(orderRef, { totals, updatedAt: FieldValue.serverTimestamp() });
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: context.session.uid,
+      action: "order.lineQuantityUpdated",
+      targetType: "order",
+      targetId: orderId,
+      branchId: currentOrder.branchId,
+      before: { total: currentOrder.totals.total },
+      after: { total: totals.total },
+    });
+  });
+}
+
+// Same shape as updateOrderLineQuantity above, deleting the line instead of
+// patching its quantity.
+export async function removeOrderLine(companyId: string, orderId: string, lineId: string): Promise<void> {
+  const { context } = await requireOrderAccess(companyId, orderId, "orders.create");
+
+  const orderRef = orderDoc(companyId, orderId);
+  const lineRef = lineDoc(companyId, orderId, lineId);
+
+  await adminDb.runTransaction(async (transaction: Transaction) => {
+    const orderSnap = await transaction.get(orderRef);
+    if (!orderSnap.exists) throw new OrderNotFoundError();
+    const currentOrder = toOrder(orderSnap.id, orderSnap.data()!);
+    if (currentOrder.status !== "pending") throw new OrderNotEditableError();
+
+    const lineSnap = await transaction.get(lineRef);
+    if (!lineSnap.exists) throw new OrderLineNotFoundError();
+
+    const linesSnap = await transaction.get(linesCollection(companyId, orderId));
+    const remainingLineTotals = linesSnap.docs
+      .filter((doc) => doc.id !== lineId)
+      .map((doc) => doc.data().lineTotal as number);
+    const totals = computeTotals({
+      lineTotals: remainingLineTotals,
+      tax: currentOrder.totals.tax,
+      discount: currentOrder.totals.discount,
+    });
+
+    transaction.delete(lineRef);
+    transaction.update(orderRef, { totals, updatedAt: FieldValue.serverTimestamp() });
+
+    writeAuditInTransaction(transaction, {
+      companyId,
+      actorId: context.session.uid,
+      action: "order.lineRemoved",
       targetType: "order",
       targetId: orderId,
       branchId: currentOrder.branchId,

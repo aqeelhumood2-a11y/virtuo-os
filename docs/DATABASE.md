@@ -78,6 +78,14 @@ companies/{companyId}/orders/{orderId}/lines/{lineId}    # subcollection: always
   branchId (denormalized from the parent order, same reason inventoryMovements carries its own),
   itemId, itemNameSnapshot, quantity, unitPrice, lineTotal
 
+companies/{companyId}/idempotencyKeys/{key}          # Phase 3 -- Core's own, internal only
+  operation (e.g. "createOrder"), resultId, createdAt
+  # generic, business-agnostic exactly-once mechanism: createOrder(input, { idempotencyKey })
+  # checks-and-sets this inside its own transaction, so Firestore's transaction retry semantics
+  # (not any App-level check-then-act) guarantee exactly one order per key under concurrency.
+  # Never read by an App directly; not a general key-value store -- only ever touched from
+  # inside the transaction of the operation that owns a given key.
+
 # --- Cross-cutting Core services --- implemented Phase 1G,
 # see docs/phases/PHASE_1G_PLAN.md
 companies/{companyId}/auditLogs/{logId}
@@ -101,10 +109,22 @@ companies/{companyId}/settings/branding
   # currencies, printing, regional -- added only when a real need exists
 ```
 
-## 3. App-owned collections (Phase 4+, namespaced so ownership is unambiguous)
+## 3. App-owned collections (namespaced so ownership is unambiguous)
 
 ```
-companies/{companyId}/apps/restaurant/tables/{tableId}
+# --- Restaurant (Phase 3, implemented; see docs/phases/PHASE_3_PLAN.md) ---
+companies/{companyId}/apps/restaurant/orderMeta/{draftId}
+  orderId (Core's own order ID -- a reference, never duplicated),
+  branchId (denormalized, same reason lines/movements carry their own),
+  orderType: dineIn | takeaway | delivery, tableRef?, guestCount?, kitchenNote?,
+  status: "confirmed", recordedAt
+  # keyed by draftId (the client-originated request key also passed to Core's
+  # createOrder as its idempotencyKey), never by Core's orderId -- see PHASE_3_PLAN.md's
+  # idempotency/consistency model for why this link must be exact and deterministic.
+  # Fields here are exactly the ones Core structurally cannot own; Core's own order
+  # document remains the sole source of truth for lines, totals, and status.
+
+# --- Future verticals (not yet implemented) ---
 companies/{companyId}/apps/kitchenDisplay/tickets/{ticketId}
 companies/{companyId}/apps/loyalty/programs/{programId}
 companies/{companyId}/apps/loyalty/members/{memberId}

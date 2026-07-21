@@ -4,8 +4,8 @@ import { getAppManifest, getRegisteredApps, registerApp } from "./registry";
 import type { AppManifest } from "./app-manifest.types";
 
 describe("app-registry registry", () => {
-  it("is empty of real registrations in Phase 2 (no vertical App exists until Phase 3)", () => {
-    expect(getRegisteredApps()).toEqual([]);
+  it("has exactly the Restaurant App registered (Phase 3's first vertical)", () => {
+    expect(getRegisteredApps().map((manifest) => manifest.id)).toEqual(["restaurant"]);
   });
 
   it("returns null for an unregistered app id", () => {
@@ -13,7 +13,7 @@ describe("app-registry registry", () => {
   });
 
   describe("registerApp", () => {
-    const fake: AppManifest = { id: "fake-app", displayName: "Fake App" };
+    const fake: AppManifest = { id: "fake-app", displayName: "Fake App", routeKey: "fake-app" };
 
     afterEach(() => {
       // No unregister API exists (apps are never removed from the catalog

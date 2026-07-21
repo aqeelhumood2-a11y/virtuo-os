@@ -227,6 +227,17 @@ service cloud.firestore {
         }
       }
 
+      // Core's own generic, business-agnostic exactly-once mechanism (3) --
+      // not App-owned, not a general key-value store. Only ever read/written
+      // from inside the Admin-SDK transaction of the operation that owns a
+      // given key (see core/order-engine/application/orders.ts's
+      // createOrder). No client ever needs to read this directly; SuperAdmin
+      // read is for ops/debugging only.
+      match /idempotencyKeys/{key} {
+        allow read: if isSuperAdmin();
+        allow write: if false;
+      }
+
       // --- Audit Logs (1G) -------------------------------------------------
       // Not branch-scoped (an audit trail spans the whole company); gated
       // by audit.view instead (Owner/Manager only -- audit history is
@@ -260,6 +271,21 @@ service cloud.firestore {
       match /apps/{appId} {
         allow read: if isActiveMember(companyId) || isSuperAdmin();
         allow write: if false;
+
+        // --- Restaurant App (3) -----------------------------------------
+        // App-owned metadata Core structurally cannot hold (order type,
+        // table reference, guest count, kitchen note) -- keyed by the
+        // client-originated draftId, never Core's own orderId, so this
+        // never needs a parent-order lookup. Same visibility tier as
+        // orders/stock: branch-scoped, Admin-SDK-only writes (every write
+        // goes through order-ticket.service.ts, which pairs it with Core's
+        // own createOrder call inside one Firestore transaction where the
+        // metadata is a repair, or a plain idempotent set otherwise -- see
+        // docs/phases/PHASE_3_PLAN.md's idempotency/consistency model).
+        match /orderMeta/{draftId} {
+          allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+          allow write: if false;
+        }
       }
 
       // Connection state only -- credentials are never stored here, only

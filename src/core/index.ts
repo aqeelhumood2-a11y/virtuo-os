@@ -47,6 +47,7 @@ export {
   requireCompanyMembership,
 } from "./companies/membership";
 export { getMyCompanySummary } from "./companies/queries";
+export { listBranches } from "./companies/branches";
 export type {
   Branch,
   Company,
@@ -107,12 +108,16 @@ export {
   InvalidOrderTransitionError,
   listOrderLines,
   listOrdersForBranch,
+  OrderLineNotFoundError,
   OrderNotEditableError,
   OrderNotFoundError,
+  removeOrderLine,
+  updateOrderLineQuantity,
   voidOrder,
 } from "./order-engine";
 export type {
   CreateOrderInput,
+  CreateOrderOptions,
   Order,
   OrderAuditAction,
   OrderLine,

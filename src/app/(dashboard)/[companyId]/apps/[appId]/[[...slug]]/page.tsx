@@ -2,12 +2,14 @@ import { resolveAppRoute } from "@/app-registry";
 import { requireCompanyMembership } from "@/core/companies/membership";
 import { isAppInstalled } from "@/platform";
 
+import { APP_ROOT_COMPONENTS } from "./app-roots";
+
 export default async function AppMountPage({
   params,
 }: {
   params: Promise<{ companyId: string; appId: string; slug?: string[] }>;
 }) {
-  const { companyId, appId } = await params;
+  const { companyId, appId, slug } = await params;
   await requireCompanyMembership(companyId);
 
   const installed = await isAppInstalled(companyId, appId);
@@ -24,13 +26,18 @@ export default async function AppMountPage({
     );
   }
 
-  // No real App exists until Phase 3 -- resolveAppRoute() can never return
-  // a non-null manifest in Phase 2 (the registry is empty), so this branch
-  // is unreachable today. Kept so the mount mechanism is fully built and
-  // tested ahead of a real App. See docs/phases/PHASE_2_PLAN.md §5.
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
-      <h1 className="text-lg font-semibold text-neutral-900">{manifest.displayName}</h1>
-    </main>
-  );
+  // App Registry only ever hands back a routeKey (plain data, see
+  // app-manifest.types.ts) -- the lookup into a real React component
+  // happens only here, at the route layer, via app-roots.ts's own map.
+  const Component = APP_ROOT_COMPONENTS[manifest.routeKey];
+  if (!Component) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
+        <h1 className="text-lg font-semibold text-neutral-900">{manifest.displayName}</h1>
+        <p className="text-sm text-neutral-600">This App has no UI mounted yet.</p>
+      </main>
+    );
+  }
+
+  return <Component companyId={companyId} slug={slug} />;
 }

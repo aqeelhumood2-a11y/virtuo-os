@@ -5,7 +5,7 @@ import { resolveAppRoute } from "./resolve-route";
 
 describe("resolveAppRoute", () => {
   it("returns null when isInstalled is false, without even checking the catalog", () => {
-    registerApp({ id: "widgets", displayName: "Widgets" });
+    registerApp({ id: "widgets", displayName: "Widgets", routeKey: "widgets" });
 
     expect(resolveAppRoute("widgets", false)).toBeNull();
   });
@@ -15,7 +15,7 @@ describe("resolveAppRoute", () => {
   });
 
   it("returns the manifest when installed and registered", () => {
-    const manifest = { id: "reports", displayName: "Reports" };
+    const manifest = { id: "reports", displayName: "Reports", routeKey: "reports" };
     registerApp(manifest);
 
     expect(resolveAppRoute("reports", true)).toEqual(manifest);

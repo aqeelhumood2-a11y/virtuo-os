@@ -12,6 +12,11 @@ const orderUpdateMock = vi.fn();
 const ordersWhereGetMock = vi.fn();
 const lineSetMock = vi.fn();
 const linesGetMock = vi.fn();
+const lineGetMock = vi.fn();
+const lineUpdateMock = vi.fn();
+const lineDeleteMock = vi.fn();
+const idempotencyGetMock = vi.fn();
+const idempotencySetMock = vi.fn();
 
 vi.mock("@/core/roles-permissions", () => ({
   requireCapability: (...args: unknown[]) => requireCapabilityMock(...args),
@@ -41,16 +46,30 @@ vi.mock("@/lib/firebase/admin", () => ({
     collection: () => ({
       doc: () => ({
         collection: (name: string) => {
+          if (name === "idempotencyKeys") {
+            return {
+              doc: () => ({
+                get: idempotencyGetMock,
+                set: (...args: unknown[]) => idempotencySetMock(...args),
+              }),
+            };
+          }
           if (name !== "orders") throw new Error(`unexpected collection: ${name}`);
           return {
             doc: () => ({
+              id: "order-1",
               get: orderGetMock,
               set: (...args: unknown[]) => orderSetMock(...args),
               update: (...args: unknown[]) => orderUpdateMock(...args),
               collection: (subName: string) => {
                 if (subName !== "lines") throw new Error(`unexpected subcollection: ${subName}`);
                 return {
-                  doc: () => ({ set: (...args: unknown[]) => lineSetMock(...args) }),
+                  doc: () => ({
+                    set: (...args: unknown[]) => lineSetMock(...args),
+                    get: lineGetMock,
+                    update: (...args: unknown[]) => lineUpdateMock(...args),
+                    delete: () => lineDeleteMock(),
+                  }),
                   get: linesGetMock,
                 };
               },
@@ -60,11 +79,12 @@ vi.mock("@/lib/firebase/admin", () => ({
         },
       }),
     }),
-    runTransaction: async (fn: (t: unknown) => Promise<void>) => {
+    runTransaction: async (fn: (t: unknown) => Promise<unknown>) => {
       const fakeTransaction = {
         get: async (ref: { get: () => unknown }) => ref.get(),
         set: (ref: { set: (...args: unknown[]) => void }, data: unknown, opts?: unknown) => ref.set(data, opts),
         update: (ref: { update: (data: unknown) => void }, data: unknown) => ref.update(data),
+        delete: (ref: { delete: () => void }) => ref.delete(),
       };
       return fn(fakeTransaction);
     },
@@ -99,6 +119,8 @@ beforeEach(() => {
   hasBranchAccessMock.mockReturnValue(true);
   orderGetMock.mockResolvedValue(fakeOrderSnapshot(true, pendingOrder));
   linesGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+  lineGetMock.mockResolvedValue({ exists: true, id: "line-1", data: () => ({ unitPrice: 5 }) });
+  idempotencyGetMock.mockResolvedValue({ exists: false });
   planStockChangeMock.mockResolvedValue({
     stockRef: {},
     movementRef: {},
@@ -177,6 +199,50 @@ describe("createOrder", () => {
   });
 });
 
+describe("createOrder with idempotencyKey", () => {
+  it("writes the idempotency record alongside the new order when the key is unseen", async () => {
+    idempotencyGetMock.mockResolvedValue({ exists: false });
+    const { createOrder } = await import("./orders");
+
+    await createOrder(
+      "company-1",
+      {
+        branchId: "branch-1",
+        appId: "restaurant",
+        lines: [{ itemId: "item-1", itemNameSnapshot: "Widget", quantity: 1, unitPrice: 5 }],
+      },
+      { idempotencyKey: "draft-1" },
+    );
+
+    expect(orderSetMock).toHaveBeenCalledTimes(1);
+    expect(idempotencySetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "createOrder", resultId: "order-1" }),
+      undefined,
+    );
+  });
+
+  it("returns the existing order instead of creating a second one when the key is already recorded", async () => {
+    idempotencyGetMock.mockResolvedValue({ exists: true, data: () => ({ resultId: "existing-order" }) });
+    orderGetMock.mockResolvedValue(fakeOrderSnapshot(true, { ...pendingOrder }));
+    const { createOrder } = await import("./orders");
+
+    const result = await createOrder(
+      "company-1",
+      {
+        branchId: "branch-1",
+        appId: "restaurant",
+        lines: [{ itemId: "item-1", itemNameSnapshot: "Widget", quantity: 1, unitPrice: 5 }],
+      },
+      { idempotencyKey: "draft-1" },
+    );
+
+    expect(orderSetMock).not.toHaveBeenCalled();
+    expect(lineSetMock).not.toHaveBeenCalled();
+    expect(idempotencySetMock).not.toHaveBeenCalled();
+    expect(result.id).toBe("order-1");
+  });
+});
+
 describe("addOrderLine", () => {
   it("rejects adding a line to a non-pending order", async () => {
     orderGetMock.mockResolvedValue(fakeOrderSnapshot(true, completedOrder));
@@ -201,6 +267,83 @@ describe("addOrderLine", () => {
 
     expect(orderUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({ totals: { subtotal: 30, tax: 0, discount: 0, total: 30 } }),
+    );
+  });
+});
+
+describe("updateOrderLineQuantity", () => {
+  it("rejects a non-positive quantity", async () => {
+    const { updateOrderLineQuantity } = await import("./orders");
+    await expect(updateOrderLineQuantity("company-1", "order-1", "line-1", 0)).rejects.toThrow(/positive/i);
+  });
+
+  it("rejects updating a line on a non-pending order", async () => {
+    orderGetMock.mockResolvedValue(fakeOrderSnapshot(true, completedOrder));
+    const { updateOrderLineQuantity } = await import("./orders");
+    const { OrderNotEditableError } = await import("../domain/errors");
+
+    await expect(updateOrderLineQuantity("company-1", "order-1", "line-1", 2)).rejects.toThrow(OrderNotEditableError);
+    expect(lineUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("throws OrderLineNotFoundError when the line doesn't exist", async () => {
+    lineGetMock.mockResolvedValue({ exists: false });
+    const { updateOrderLineQuantity } = await import("./orders");
+    const { OrderLineNotFoundError } = await import("../domain/errors");
+
+    await expect(updateOrderLineQuantity("company-1", "order-1", "ghost", 2)).rejects.toThrow(OrderLineNotFoundError);
+  });
+
+  it("recomputes totals from every other line plus the new quantity", async () => {
+    linesGetMock.mockResolvedValue(
+      fakeQuerySnapshot([
+        { lineTotal: 5 },
+        { lineTotal: 20 },
+      ]),
+    );
+    lineGetMock.mockResolvedValue({ exists: true, id: "line-1", data: () => ({ unitPrice: 5 }) });
+    const { updateOrderLineQuantity } = await import("./orders");
+
+    // fakeQuerySnapshot assigns ids doc-0/doc-1; the mocked lineDoc() ref
+    // always resolves to id "line-1" via lineGetMock, so simulate updating
+    // the line identified as "doc-0" being excluded is not testable with
+    // this shared-id mock -- assert the shape of the recompute instead.
+    await updateOrderLineQuantity("company-1", "order-1", "doc-0", 3);
+
+    expect(lineUpdateMock).toHaveBeenCalledWith({ quantity: 3, lineTotal: 15 });
+    expect(orderUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ totals: { subtotal: 35, tax: 0, discount: 0, total: 35 } }),
+    );
+  });
+});
+
+describe("removeOrderLine", () => {
+  it("rejects removing a line from a non-pending order", async () => {
+    orderGetMock.mockResolvedValue(fakeOrderSnapshot(true, completedOrder));
+    const { removeOrderLine } = await import("./orders");
+    const { OrderNotEditableError } = await import("../domain/errors");
+
+    await expect(removeOrderLine("company-1", "order-1", "line-1")).rejects.toThrow(OrderNotEditableError);
+    expect(lineDeleteMock).not.toHaveBeenCalled();
+  });
+
+  it("throws OrderLineNotFoundError when the line doesn't exist", async () => {
+    lineGetMock.mockResolvedValue({ exists: false });
+    const { removeOrderLine } = await import("./orders");
+    const { OrderLineNotFoundError } = await import("../domain/errors");
+
+    await expect(removeOrderLine("company-1", "order-1", "ghost")).rejects.toThrow(OrderLineNotFoundError);
+  });
+
+  it("deletes the line and recomputes totals from the remaining lines", async () => {
+    linesGetMock.mockResolvedValue(fakeQuerySnapshot([{ lineTotal: 5 }, { lineTotal: 20 }]));
+    const { removeOrderLine } = await import("./orders");
+
+    await removeOrderLine("company-1", "order-1", "doc-0");
+
+    expect(lineDeleteMock).toHaveBeenCalledTimes(1);
+    expect(orderUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ totals: { subtotal: 20, tax: 0, discount: 0, total: 20 } }),
     );
   });
 });

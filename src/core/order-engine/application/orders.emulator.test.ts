@@ -209,6 +209,57 @@ describe.skipIf(!IS_EMULATOR)("order-engine (Firestore Emulator)", () => {
     expect(voidMovement?.quantityDelta).toBe(3);
   });
 
+  it("with an idempotencyKey, two concurrent createOrder calls for the same key produce exactly one order", async () => {
+    const companyId = `company-${randomUUID()}`;
+    const uid = `uid-${randomUUID()}`;
+    const itemId = `item-${randomUUID()}`;
+    await seedCompanyItemAndStock(companyId, uid, itemId, "branch-1", 10);
+    requireSessionMock.mockResolvedValue({ uid, email: null, superAdmin: false });
+
+    const { createOrder } = await import("./orders");
+    const idempotencyKey = `key-${randomUUID()}`;
+    const input = {
+      branchId: "branch-1",
+      appId: "restaurant",
+      lines: [{ itemId, itemNameSnapshot: "Widget", quantity: 1, unitPrice: 9.99 }],
+    };
+
+    // Two genuinely concurrent calls with the same idempotencyKey -- this
+    // is the exact scenario the reported defect was about: a naive
+    // check-then-act guard lets both callers read "not yet created" before
+    // either writes. Firestore's own transaction retry semantics (not any
+    // application-level lock) are what must collapse this into one order.
+    const [first, second] = await Promise.all([
+      createOrder(companyId, input, { idempotencyKey }),
+      createOrder(companyId, input, { idempotencyKey }),
+    ]);
+
+    expect(first.id).toBe(second.id);
+
+    const { adminDb } = await import("@/lib/firebase/admin");
+    const ordersSnap = await adminDb.collection("companies").doc(companyId).collection("orders").get();
+    expect(ordersSnap.docs).toHaveLength(1);
+  });
+
+  it("without an idempotencyKey, two concurrent createOrder calls create two separate orders (unchanged prior behavior)", async () => {
+    const companyId = `company-${randomUUID()}`;
+    const uid = `uid-${randomUUID()}`;
+    const itemId = `item-${randomUUID()}`;
+    await seedCompanyItemAndStock(companyId, uid, itemId, "branch-1", 10);
+    requireSessionMock.mockResolvedValue({ uid, email: null, superAdmin: false });
+
+    const { createOrder } = await import("./orders");
+    const input = {
+      branchId: "branch-1",
+      appId: "restaurant",
+      lines: [{ itemId, itemNameSnapshot: "Widget", quantity: 1, unitPrice: 9.99 }],
+    };
+
+    const [first, second] = await Promise.all([createOrder(companyId, input), createOrder(companyId, input)]);
+
+    expect(first.id).not.toBe(second.id);
+  });
+
   it("denies completing an order for a member whose branchIds excludes the order's branch", async () => {
     const companyId = `company-${randomUUID()}`;
     const uid = `uid-${randomUUID()}`;

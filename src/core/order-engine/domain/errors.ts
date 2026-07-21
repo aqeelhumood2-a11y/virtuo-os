@@ -27,3 +27,10 @@ export class OrderNotEditableError extends Error {
     this.name = "OrderNotEditableError";
   }
 }
+
+export class OrderLineNotFoundError extends Error {
+  constructor() {
+    super("Order line not found.");
+    this.name = "OrderLineNotFoundError";
+  }
+}

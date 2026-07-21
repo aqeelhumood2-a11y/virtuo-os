@@ -6,8 +6,11 @@ export type AppManifest = {
   id: string;
   displayName: string;
   icon?: string;
-  // Reserved for a future App to declare its own route tree; no real App
-  // exists until Phase 3, so this stays a minimal placeholder shape rather
-  // than a speculative full routing type.
-  routes?: unknown;
+  // Identifies which entry in the Next.js route layer's own routeKey ->
+  // Component map (src/app/(dashboard)/[companyId]/apps/[appId]/[[...slug]]/
+  // app-roots.ts) renders this App's UI. Deliberately a plain string, never
+  // a ComponentType/React import -- App Registry must stay UI-independent
+  // (docs/phases/PHASE_3_PLAN.md §3/§9); React lives only at the route
+  // layer, which is already permitted to depend on everything below it.
+  routeKey: string;
 };

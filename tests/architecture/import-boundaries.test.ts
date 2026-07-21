@@ -211,6 +211,26 @@ describe("architecture import boundaries", () => {
     expect(restrictedPathErrors(connectorsResult)).toHaveLength(0);
   });
 
+  // --- Phase 3: Restaurant App -- domain-specific pins on top of the
+  // blanket "Apps" zone above, confirming the rule actually fires for a
+  // real App's own path, not just a synthetic src/apps/ fixture.
+
+  it("forbids the Restaurant App importing from Platform", async () => {
+    const result = await lintAsFile(
+      "src/apps/restaurant/__boundary_fixture__.ts",
+      `import "../../platform";\nexport {};\n`,
+    );
+    expect(restrictedPathErrors(result)).not.toHaveLength(0);
+  });
+
+  it("forbids the Restaurant App importing from Connectors", async () => {
+    const result = await lintAsFile(
+      "src/apps/restaurant/__boundary_fixture__.ts",
+      `import "../../connectors";\nexport {};\n`,
+    );
+    expect(restrictedPathErrors(result)).not.toHaveLength(0);
+  });
+
   it("allows Settings importing from Core, Platform, and App Registry (negative control)", async () => {
     const coreResult = await lintAsFile(
       "src/settings/__boundary_fixture_valid_core__.ts",

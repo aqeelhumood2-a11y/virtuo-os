@@ -5,7 +5,13 @@ export type OrderStatus = "pending" | "completed" | "voided";
 // union right here, next to the code that produces it, never editing a
 // file in a different module. core/audit-logs/audit-log.types.ts unions
 // this into the public AuditAction type; see the comment there.
-export type OrderAuditAction = "order.created" | "order.lineAdded" | "order.completed" | "order.voided";
+export type OrderAuditAction =
+  | "order.created"
+  | "order.lineAdded"
+  | "order.lineQuantityUpdated"
+  | "order.lineRemoved"
+  | "order.completed"
+  | "order.voided";
 
 export type OrderTotals = {
   subtotal: number;
