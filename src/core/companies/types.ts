@@ -57,6 +57,7 @@ export type CompanyAuditAction =
   | "company.onboarded"
   | "company.updated"
   | "company.suspended"
-  | "company.reactivated";
+  | "company.reactivated"
+  | "company.brandingUpdated";
 
 export type MembershipAuditAction = "membership.roleUpdated" | "membership.deactivated";

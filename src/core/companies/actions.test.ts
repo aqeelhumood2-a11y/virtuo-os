@@ -10,6 +10,7 @@ const requireSessionMock = vi.fn();
 const runOnboardingTransactionMock = vi.fn();
 const updateCompanyNameMock = vi.fn();
 const setCompanyStatusMock = vi.fn();
+const updateCompanyBrandingMock = vi.fn();
 const revalidatePathMock = vi.fn();
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
@@ -37,6 +38,10 @@ vi.mock("./company", () => ({
   setCompanyStatus: (...args: unknown[]) => setCompanyStatusMock(...args),
 }));
 
+vi.mock("./company-settings", () => ({
+  updateCompanyBranding: (...args: unknown[]) => updateCompanyBrandingMock(...args),
+}));
+
 vi.mock("@/core/auth/csrf", () => ({
   csrfTokensMatch: (...args: unknown[]) => csrfTokensMatchMock(...args),
 }));
@@ -57,7 +62,7 @@ vi.mock("./onboarding", async () => {
   };
 });
 
-import { createCompanyAction, suspendCompanyAction, updateCompanyAction } from "./actions";
+import { createCompanyAction, suspendCompanyAction, updateBrandingAction, updateCompanyAction } from "./actions";
 import { AlreadyOnboardedError } from "./onboarding";
 
 function formData(fields: Record<string, string>): FormData {
@@ -214,6 +219,55 @@ describe("suspendCompanyAction", () => {
   it("maps an unexpected error (e.g. a capability rejection) to a generic message", async () => {
     setCompanyStatusMock.mockRejectedValue(new Error("Forbidden"));
     const result = await suspendCompanyAction({}, validForm("suspended"));
+
+    expect(result.error).toBe("Something went wrong. Please try again.");
+    expect(result.error).not.toContain("Forbidden");
+  });
+});
+
+describe("updateBrandingAction", () => {
+  const validForm = (fields: Record<string, string> = {}) =>
+    formData({
+      companyId: "company-1",
+      logoUrl: "https://x.test/logo.png",
+      primaryColor: "#336699",
+      csrfToken: "valid-csrf-token",
+      ...fields,
+    });
+
+  it("rejects when the CSRF token does not match", async () => {
+    csrfTokensMatchMock.mockReturnValue(false);
+    const result = await updateBrandingAction({}, validForm());
+    expect(result.error).toMatch(/session has expired/i);
+    expect(updateCompanyBrandingMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a primaryColor that isn't a hex color", async () => {
+    const result = await updateBrandingAction({}, validForm({ primaryColor: "blue" }));
+    expect(result.error).toMatch(/hex color/i);
+    expect(updateCompanyBrandingMock).not.toHaveBeenCalled();
+  });
+
+  it("treats blank fields as omitted rather than a validation failure", async () => {
+    const result = await updateBrandingAction({}, validForm({ logoUrl: "", primaryColor: "" }));
+    expect(updateCompanyBrandingMock).toHaveBeenCalledWith("company-1", { logoUrl: undefined, primaryColor: undefined });
+    expect(result.success).toBeDefined();
+  });
+
+  it("calls updateCompanyBranding with the validated fields, then revalidates the settings path", async () => {
+    const result = await updateBrandingAction({}, validForm());
+
+    expect(updateCompanyBrandingMock).toHaveBeenCalledWith("company-1", {
+      logoUrl: "https://x.test/logo.png",
+      primaryColor: "#336699",
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/company-1/settings");
+    expect(result.success).toBeDefined();
+  });
+
+  it("maps an unexpected error (e.g. a capability rejection) to a generic message", async () => {
+    updateCompanyBrandingMock.mockRejectedValue(new Error("Forbidden"));
+    const result = await updateBrandingAction({}, validForm());
 
     expect(result.error).toBe("Something went wrong. Please try again.");
     expect(result.error).not.toContain("Forbidden");

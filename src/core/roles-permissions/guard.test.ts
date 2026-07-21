@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireCompanyMembershipMock = vi.fn();
+const requireSessionMock = vi.fn();
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
 
 vi.mock("@/core/companies/membership", () => ({
   requireCompanyMembership: (...args: unknown[]) => requireCompanyMembershipMock(...args),
+}));
+
+vi.mock("@/core/auth/session", () => ({
+  requireSession: () => requireSessionMock(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -65,5 +70,31 @@ describe("requireCapability", () => {
     await expect(requireCapability("company-1", "membership.updateRole")).rejects.toThrow(
       "REDIRECT:/account",
     );
+  });
+});
+
+describe("requireSuperAdmin", () => {
+  it("returns the session when the superAdmin claim is true", async () => {
+    const session = { uid: "admin-1", email: "admin@example.com", superAdmin: true };
+    requireSessionMock.mockResolvedValue(session);
+    const { requireSuperAdmin } = await import("./guard");
+
+    await expect(requireSuperAdmin()).resolves.toEqual(session);
+  });
+
+  it("redirects to /account when the caller is authenticated but not a Super Admin", async () => {
+    requireSessionMock.mockResolvedValue({ uid: "uid-1", email: null, superAdmin: false });
+    const { requireSuperAdmin } = await import("./guard");
+
+    await expect(requireSuperAdmin()).rejects.toThrow("REDIRECT:/account");
+  });
+
+  it("propagates requireSession's own redirect-to-/login for an unauthenticated caller", async () => {
+    requireSessionMock.mockImplementation(() => {
+      throw new Error("REDIRECT:/login");
+    });
+    const { requireSuperAdmin } = await import("./guard");
+
+    await expect(requireSuperAdmin()).rejects.toThrow("REDIRECT:/login");
   });
 });

@@ -13,11 +13,14 @@ function auditLogsCollection(companyId: string) {
   return adminDb.collection("companies").doc(companyId).collection("auditLogs");
 }
 
-export type AuditLogParams = {
+export type AuditLogParams<
+  TAction extends string = AuditAction,
+  TTargetType extends string = AuditTargetType,
+> = {
   companyId: string;
   actorId: string;
-  action: AuditAction;
-  targetType: AuditTargetType;
+  action: TAction;
+  targetType: TTargetType;
   targetId: string;
   branchId?: string;
   before?: Record<string, unknown>;
@@ -31,7 +34,20 @@ export type AuditLogParams = {
 // here: this is an internal recording primitive, not a read/write entry
 // point of its own -- the caller's own guard (inventory.write,
 // orders.complete, etc.) is what authorized the mutation being logged.
-export function writeAuditInTransaction(transaction: Transaction, params: AuditLogParams): void {
+//
+// Generic over the action/targetType literal types (Phase 2), defaulting
+// to Core's own closed AuditAction/AuditTargetType unions -- every existing
+// Core call site is unaffected, since none supplies an explicit type
+// argument. This lets Platform (which owns its own closed action/target
+// vocabulary, e.g. AppInstallAuditAction, and which Core must never import
+// -- see docs/phases/PHASE_2_PLAN.md §2/§5) call this same primitive with
+// full compile-time exhaustiveness over its own vocabulary:
+// `writeAuditInTransaction<AppInstallAuditAction, "app">(transaction, {...})`
+// -- without core/audit-logs ever knowing Platform's action literals exist.
+export function writeAuditInTransaction<
+  TAction extends string = AuditAction,
+  TTargetType extends string = AuditTargetType,
+>(transaction: Transaction, params: AuditLogParams<TAction, TTargetType>): void {
   const { companyId, ...entry } = params;
   const ref = auditLogsCollection(companyId).doc();
   transaction.set(ref, {

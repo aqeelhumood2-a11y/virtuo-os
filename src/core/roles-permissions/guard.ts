@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { requireCompanyMembership } from "@/core/companies/membership";
 import type { CompanyMembershipContext } from "@/core/companies/membership";
+import { requireSession } from "@/core/auth/session";
 import type { AuthSession } from "@/core/auth/types";
 
 import { ROLE_CAPABILITIES } from "./matrix";
@@ -38,4 +39,23 @@ export async function requireCapability(
   }
 
   return context;
+}
+
+// The first SuperAdmin *write* path in Core (every prior use of
+// isSuperAdmin() was a read-only rules bypass) -- deliberately narrow and
+// separate from requireCapability(): it checks only the global superAdmin
+// custom claim, with no membership lookup and no company-scoped capability
+// involved, since a Super Admin acts across companies, not as a member of
+// one. Reuses the session layer only (requireSession(), isSuperAdmin())
+// -- no Platform concept is referenced here; this is Core's own RBAC
+// vocabulary (see docs/phases/PHASE_2_PLAN.md §3/§10 for why this stays a
+// named exception rather than a general bypass).
+export async function requireSuperAdmin(): Promise<AuthSession> {
+  const session = await requireSession();
+
+  if (!isSuperAdmin(session)) {
+    redirect("/account");
+  }
+
+  return session;
 }

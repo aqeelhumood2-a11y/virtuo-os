@@ -80,6 +80,26 @@ service cloud.firestore {
       return isActiveMember(companyId) && capability in roleCapabilities(memberRole(companyId));
     }
 
+    // Hand-maintained mirror of Platform's OWN capability matrix
+    // (platform/shared/require-platform-capability.ts's
+    // PLATFORM_ROLE_CAPABILITIES) -- deliberately a SEPARATE function from
+    // roleCapabilities()/hasCapability() above, never merged with them.
+    // Core's capability matrix must never gain an entry for something
+    // Platform owns (licenses/apps/connectors are commercial concepts Core
+    // has no knowledge of -- see docs/phases/PHASE_2_PLAN.md §8). Only
+    // licenses.view is modeled here: every write to Platform's collections
+    // below is Admin-SDK-only regardless of role, so no other Platform
+    // capability needs a rules-side equivalent, and apps/connectors reads
+    // are simply gated by isActiveMember() (low-sensitivity, same tier as
+    // branches), not a capability at all.
+    function platformRoleCapabilities(role) {
+      return (role == 'Owner' || role == 'Manager') ? ['licenses.view'] : [];
+    }
+
+    function hasPlatformCapability(companyId, capability) {
+      return isActiveMember(companyId) && capability in platformRoleCapabilities(memberRole(companyId));
+    }
+
     // --- users/{uid} -----------------------------------------------------
     // Self-read-only: there is no legitimate reason in this phase for one
     // user to read another user's profile document, and this also means a
@@ -216,6 +236,48 @@ service cloud.firestore {
       // so this rule never needs to allow one.
       match /auditLogs/{logId} {
         allow read: if hasCapability(companyId, 'audit.view') || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // --- Platform (2) -----------------------------------------------------
+      // Entitlement only (plan, entitledApps/entitledConnectors, seats) --
+      // never install state, which lives exclusively in apps/connectors
+      // below (see docs/phases/PHASE_2_PLAN.md §2/§7). Closer to billing-
+      // tier information than to "which apps are on," so gated by
+      // licenses.view (Owner/Manager) rather than plain membership. Write
+      // is Admin-SDK-only: license provisioning is ops/SuperAdmin tooling,
+      // never an in-app mutation in Phase 2.
+      match /licenses/{licenseId} {
+        allow read: if hasPlatformCapability(companyId, 'licenses.view') || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // The sole source of truth for installed-App state -- any active
+      // member can see what's installed (low-sensitivity, same tier as
+      // branches), but only platform/app-installs (Admin SDK) ever writes
+      // it, whether via a capability-gated install/uninstall or a Super
+      // Admin force-toggle.
+      match /apps/{appId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Connection state only -- credentials are never stored here, only
+      // an opaque credentialRef (see docs/DATABASE.md §5). Same visibility
+      // tier as apps/ above.
+      match /connectors/{connectorId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Company tenant configuration (branding now; localization/tax/
+      // numbering/receipts/currencies/printing/regional later), one
+      // document per settingId -- owned by core/companies/company-settings.ts,
+      // not Platform (this is not a commercial concept). Same visibility
+      // tier as branches; every write goes through updateCompanyBranding()
+      // (Admin SDK).
+      match /settings/{settingId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
         allow write: if false;
       }
     }

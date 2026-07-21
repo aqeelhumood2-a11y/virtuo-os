@@ -12,6 +12,8 @@ import { requireSession } from "@/core/auth/session";
 
 import { RATE_LIMIT_ACTION_ONBOARDING } from "./constants";
 import { setCompanyStatus, updateCompanyName } from "./company";
+import { updateCompanyBranding } from "./company-settings";
+import type { CompanySettingsFormState } from "./company-settings.types";
 import { AlreadyOnboardedError, runOnboardingTransaction } from "./onboarding";
 import type { CompanyActionFormState, OnboardingFormState } from "./types";
 
@@ -27,6 +29,16 @@ const updateCompanySchema = z.object({
 const suspendCompanySchema = z.object({
   companyId: z.string().trim().min(1),
   status: z.enum(["active", "suspended"]),
+});
+
+const brandingSchema = z.object({
+  companyId: z.string().trim().min(1),
+  logoUrl: z.string().trim().max(2000).optional(),
+  primaryColor: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a hex color like #336699")
+    .optional(),
 });
 
 async function verifyCsrf(formData: FormData): Promise<boolean> {
@@ -140,4 +152,42 @@ export async function suspendCompanyAction(
   return {
     success: parsed.data.status === "suspended" ? "Company suspended." : "Company reactivated.",
   };
+}
+
+// Blank form fields arrive as empty strings, not absent -- treated as "not
+// set" (undefined) rather than failing validation, so clearing a
+// previously-set logo/color is a normal, successful submission.
+function undefinedIfBlank(value: FormDataEntryValue | null): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+export async function updateBrandingAction(
+  _prevState: CompanySettingsFormState,
+  formData: FormData,
+): Promise<CompanySettingsFormState> {
+  if (!(await verifyCsrf(formData))) {
+    return { error: "Your session has expired. Please refresh the page and try again." };
+  }
+
+  const parsed = brandingSchema.safeParse({
+    companyId: formData.get("companyId"),
+    logoUrl: undefinedIfBlank(formData.get("logoUrl")),
+    primaryColor: undefinedIfBlank(formData.get("primaryColor")),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid branding values." };
+  }
+
+  try {
+    await updateCompanyBranding(parsed.data.companyId, {
+      logoUrl: parsed.data.logoUrl,
+      primaryColor: parsed.data.primaryColor,
+    });
+  } catch (error) {
+    console.error("Branding update failed:", error);
+    return { error: "Something went wrong. Please try again." };
+  }
+
+  revalidatePath(`/${parsed.data.companyId}/settings`);
+  return { success: "Branding updated." };
 }

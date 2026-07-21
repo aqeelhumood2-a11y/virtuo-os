@@ -26,8 +26,15 @@ export type { CreateNotificationInput, Notification, NotificationChannel, Relate
 
 export type { Page, PageOptions } from "@/shared/types";
 
-export { createCompanyAction, suspendCompanyAction, updateCompanyAction } from "./companies/actions";
+export {
+  createCompanyAction,
+  suspendCompanyAction,
+  updateBrandingAction,
+  updateCompanyAction,
+} from "./companies/actions";
 export { setCompanyStatus, updateCompanyName } from "./companies/company";
+export { getCompanyBranding, updateCompanyBranding } from "./companies/company-settings";
+export type { CompanyBranding, CompanySettingsFormState } from "./companies/company-settings.types";
 export { BranchAccessDeniedError } from "./companies/errors";
 export { deactivateMemberAction, updateMemberRoleAction } from "./companies/members-actions";
 export { AlreadyOnboardedError, runOnboardingTransaction } from "./companies/onboarding";
@@ -53,7 +60,7 @@ export type {
   OnboardingResult,
 } from "./companies/types";
 
-export { hasCapability, isSuperAdmin, requireCapability } from "./roles-permissions/guard";
+export { hasCapability, isSuperAdmin, requireCapability, requireSuperAdmin } from "./roles-permissions/guard";
 export { ROLE_CAPABILITIES, outranks } from "./roles-permissions/matrix";
 export type { Capability, Role } from "./roles-permissions/types";
 

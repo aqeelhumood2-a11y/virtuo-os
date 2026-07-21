@@ -62,12 +62,12 @@ Audit every mutation from 1B–1F; before/after values captured where safe to do
 
 Implementation does not begin on 1A until explicitly approved. Each subsequent sub-phase requires its own explicit approval in turn.
 
-## Phase 2 — App & Connector Infrastructure
-2.1 `apps-registry`: `AppManifest` type, registration, per-company install/uninstall state.
+## Phase 2 — App, Platform & Connector Infrastructure (implemented; see `docs/phases/PHASE_2_PLAN.md`)
+2.1 `app-registry` (renamed from the originally-sketched `apps-registry`): `AppManifest` type, registration, discovery, pure route resolution -- a catalog only. Per-company install/uninstall state moved to a new `platform` layer (2.4 below), not the registry itself.
 2.2 Dynamic routing so an installed App's routes mount under `[companyId]/apps/[appId]`.
-2.3 `connectors` registry + shared `ConnectorContract`; one stub connector (Custom API) built purely to prove the interface end-to-end.
-2.4 `core/licenses`: plan → entitled Apps/Connectors.
-2.5 `settings` module: branding, install/uninstall UI for Apps and Connectors.
+2.3 `connectors` registry + shared `ConnectorContract`; one stub connector (Custom API) built purely to prove the interface end-to-end. Connectors are pure adapters -- no Firestore, no Core, no Platform import.
+2.4 New `platform` layer (not `core/licenses` as originally sketched -- licensing/subscriptions are a commercial concern Core must never know about): `platform/licenses` (entitlement only), `platform/app-installs` (install state + business logic), `platform/connector-connections` (connection state + business logic).
+2.5 `settings` module: Server Actions, forms, and pages only (branding, install/uninstall UI for Apps and Connectors), calling into `platform`'s services -- no business logic of its own.
 
 **Milestone 2:** Super Admin can toggle an App on/off for a company and see it appear/disappear live; a stub connector can be configured and shows a connected status. Still no real vertical business logic — this phase proves the *platform*, not a product.
 
