@@ -50,6 +50,20 @@ companies/{companyId}/connectors/{connectorId}
   status (connected|disconnected|error), lastSyncAt, credentialRef?, config: {...}
   # owned by platform/connector-connections; credentials NOT stored here, see §5
 
+# --- Connector sync mappings (Phase 5) --- implemented Phase 5, see docs/phases/PHASE_5_PLAN.md
+companies/{companyId}/connectors/{connectorId}/productMappings/{externalId}
+  itemId (Core's own InventoryItem id), externalQuantity? (informational only, never
+  written into Core's stock -- see PHASE_5_PLAN.md §6), lastSyncedAt
+  # owned by platform/connector-connections; upsert key for inbound product sync,
+  # so a product already mapped updates the existing Core Item, never duplicates it
+
+companies/{companyId}/connectors/{connectorId}/outboundOrderMappings/{orderId}
+  status: "reserved" | "pushed", externalOrderId?, reservedAt, pushedAt?
+  # owned by platform/connector-connections; doubles as the idempotency guard
+  # (an order already mapped is never re-selected) and the race guard
+  # (reserveOutboundOrder's transactional create-if-absent check stops two
+  # concurrent "Sync Now" clicks from both pushing the same order twice)
+
 # --- Inventory Engine (Core, reused by every vertical) --- implemented Phase 1E,
 # see docs/phases/PHASE_1E_PLAN.md
 companies/{companyId}/inventoryItems/{itemId}          # company-wide catalog, not branch-scoped
@@ -186,7 +200,9 @@ Anticipated for later phases, added only once a real query needs them:
 
 ## 5. Secrets & credentials — explicitly NOT in Firestore
 
-Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are never stored as plain Firestore fields. Phase 2 establishes the shape (`connectors/{connectorId}.credentialRef?: string`, an opaque pointer, returned by a `ConnectorContract`'s `connect()` and persisted by `platform/connector-connections` — never the credential itself) ahead of any real connector needing it: the Phase 2 stub `custom-api` connector has no real secret to store, but the field exists now so Phase 5's real connectors need no schema change. The pointer is expected to resolve to a real secret store (Google Secret Manager, by name/version) once a real connector exists — consistent with the spec's "no hardcoded secrets" / "never expose secrets" rules.
+Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are never stored as plain Firestore fields. Phase 2 established the shape (`connectors/{connectorId}.credentialRef?: string`, an opaque pointer, persisted by `platform/connector-connections` — never the credential itself) ahead of any real connector needing it, so Phase 5's real connectors needed no schema change.
+
+**Implemented (Phase 5):** the pointer resolves to a real Google Secret Manager secret version, via the new `platform/secrets` module (`storeConnectorCredential`/`resolveConnectorCredential`/`deleteConnectorCredential`). A `ConnectorContract`'s `connect()` now returns an optional plaintext `credential` (moved into Secret Manager, never persisted to Firestore) and `safeConfig` (the non-secret fields, e.g. a shop domain, persisted directly). The Secret Manager client reuses the exact same GCP service-account credentials already validated for Firebase Admin — no new secret or env var was introduced. See `docs/phases/PHASE_5_PLAN.md` §5.
 
 ## 6. Security Rules strategy
 
@@ -199,3 +215,5 @@ Connector credentials (API keys, OAuth tokens for Shopify/Square/Odoo/etc.) are 
 Note this **supersedes** the originally-sketched aspirational shape (a generic `hasCapability(companyId, '<collection>.write')` direct-client-write rule per collection) — `ARCHITECTURE.md` §6 is explicit that inventory adjustments and order status changes go through server-side logic, not rule-gated direct writes, and the multi-document atomicity these transactions need (an order's status change plus every line's stock deduction, in one commit) couldn't be expressed safely as a rules-only invariant regardless.
 
 **Implemented (Phase 2)**, for `licenses`/`apps`/`connectors`/`users/{uid}/notifications`-adjacent `settings`: every write is `if false` (Admin-SDK-only, same policy as everywhere else). Reads differ by sensitivity tier: `licenses` (closer to billing-tier information) is gated by a **new, separate** `hasPlatformCapability(companyId, 'licenses.view')` helper — a hand-maintained mirror of Platform's own `PLATFORM_ROLE_CAPABILITIES` matrix (`platform/shared/require-platform-capability.ts`), deliberately never merged with `roleCapabilities()`/`hasCapability()` above, since Core's capability matrix must never gain an entry for a commercial concept it doesn't know exists (see `docs/phases/PHASE_2_PLAN.md` §8). `apps`/`connectors`/`settings` reads are simply `isActiveMember(companyId) || isSuperAdmin()` — the same low-sensitivity tier as `branches`, since knowing what's installed/connected/branded isn't as sensitive as audit history or plan/billing details.
+
+**Implemented (Phase 5)**, for `connectors/{connectorId}/productMappings` and `connectors/{connectorId}/outboundOrderMappings`: same low-sensitivity tier and same `isActiveMember(companyId) || isSuperAdmin()` read gate as `connectors/{connectorId}` itself; every write is `if false` (Admin-SDK-only, via `syncConnector()`). No new composite index was needed — every mapping doc is read by its own id, never queried.

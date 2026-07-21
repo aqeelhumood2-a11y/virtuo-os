@@ -46,7 +46,7 @@ Owns identity, tenancy, RBAC, and the two cross-industry business primitives eve
 Each App is a self-contained folder with a manifest (id, display name, icon, required permissions, routes, owned Firestore collections, install/uninstall hooks). Apps consume Core engines; they do not talk to Firestore for things Core already models (stock, orders) — they extend, they don't duplicate.
 
 ### Connectors (isolated integrations)
-Each Connector implements one shared `ConnectorContract` (connect / sync / disconnect / webhook handler) and owns its own credential storage, mapping layer, and failure handling. A Connector can be fully removed without touching Core or any App.
+Each Connector implements one shared `ConnectorContract` (connect / sync / disconnect / webhook handler) as a pure, stateless adapter — no Firestore, no credential storage of its own. Credential storage (Google Secret Manager), the mapping layer (product/order mappings), and failure handling live in `platform/connector-connections`, the only module permitted to import a Connector — see `docs/phases/PHASE_2_PLAN.md` §2/§4 and `docs/phases/PHASE_5_PLAN.md` §5. A Connector can be fully removed without touching Core or any App.
 
 ### Settings
 Per-company configuration surface: branding, locale, which Apps/Connectors are installed, plan/license state. Reads Core (`licenses`, `companies`) and writes install-state, nothing else.

@@ -319,6 +319,19 @@ service cloud.firestore {
       match /connectors/{connectorId} {
         allow read: if isActiveMember(companyId) || isSuperAdmin();
         allow write: if false;
+
+        // --- Phase 5: real connector sync mappings -----------------------
+        // Platform-owned (not an App's), same low-sensitivity visibility
+        // tier as the connection doc above. Every write goes through
+        // syncConnector() (Admin SDK) -- see docs/phases/PHASE_5_PLAN.md §6/§7.
+        match /productMappings/{externalId} {
+          allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
+        match /outboundOrderMappings/{orderId} {
+          allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
       }
 
       // Company tenant configuration (branding now; localization/tax/

@@ -78,6 +78,16 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: licenses/apps/connector
       await setDoc(doc(db, "companies", companyId, "connectors", "custom-api"), {
         status: "connected",
       });
+      await setDoc(doc(db, "companies", companyId, "connectors", "shopify", "productMappings", "ext-1"), {
+        itemId: "item-1",
+        lastSyncedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await setDoc(doc(db, "companies", companyId, "connectors", "shopify", "outboundOrderMappings", "order-1"), {
+        status: "pushed",
+        externalOrderId: "999",
+        reservedAt: "2026-01-01T00:00:00.000Z",
+        pushedAt: "2026-01-01T00:00:01.000Z",
+      });
       await setDoc(doc(db, "companies", companyId, "settings", "branding"), {
         logoUrl: null,
         primaryColor: "#336699",
@@ -177,6 +187,62 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: licenses/apps/connector
 
       await assertFails(
         updateDoc(doc(ownerDb, "companies", "company-1", "connectors", "custom-api"), { status: "disconnected" }),
+      );
+    });
+  });
+
+  describe("connectors/{connectorId}/productMappings/{externalId}: Phase 5 sync mappings", () => {
+    it("allows any active member to read", async () => {
+      await seedCompanyWithRoster("company-1");
+      const employeeDb = testEnv.authenticatedContext("employee-1").firestore();
+
+      await assertSucceeds(getDoc(doc(employeeDb, "companies", "company-1", "connectors", "shopify", "productMappings", "ext-1")));
+    });
+
+    it("denies a non-member", async () => {
+      await seedCompanyWithRoster("company-1");
+      const strangerDb = testEnv.authenticatedContext("stranger-1").firestore();
+
+      await assertFails(getDoc(doc(strangerDb, "companies", "company-1", "connectors", "shopify", "productMappings", "ext-1")));
+    });
+
+    it("denies every direct client write, even for the Owner -- only syncConnector() (Admin SDK) writes these", async () => {
+      await seedCompanyWithRoster("company-1");
+      const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
+
+      await assertFails(
+        updateDoc(doc(ownerDb, "companies", "company-1", "connectors", "shopify", "productMappings", "ext-1"), { itemId: "item-2" }),
+      );
+    });
+  });
+
+  describe("connectors/{connectorId}/outboundOrderMappings/{orderId}: Phase 5 sync mappings", () => {
+    it("allows any active member to read", async () => {
+      await seedCompanyWithRoster("company-1");
+      const employeeDb = testEnv.authenticatedContext("employee-1").firestore();
+
+      await assertSucceeds(
+        getDoc(doc(employeeDb, "companies", "company-1", "connectors", "shopify", "outboundOrderMappings", "order-1")),
+      );
+    });
+
+    it("denies a non-member", async () => {
+      await seedCompanyWithRoster("company-1");
+      const strangerDb = testEnv.authenticatedContext("stranger-1").firestore();
+
+      await assertFails(
+        getDoc(doc(strangerDb, "companies", "company-1", "connectors", "shopify", "outboundOrderMappings", "order-1")),
+      );
+    });
+
+    it("denies every direct client write, even for the Owner", async () => {
+      await seedCompanyWithRoster("company-1");
+      const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
+
+      await assertFails(
+        updateDoc(doc(ownerDb, "companies", "company-1", "connectors", "shopify", "outboundOrderMappings", "order-1"), {
+          status: "reserved",
+        }),
       );
     });
   });

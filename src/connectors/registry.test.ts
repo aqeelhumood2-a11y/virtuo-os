@@ -9,6 +9,12 @@ describe("connectors registry", () => {
     expect(getRegisteredConnectors().some((c) => c.id === "custom-api")).toBe(true);
   });
 
+  it("registers the Phase 5 real connectors (shopify, square, odoo) at module load", () => {
+    expect(getConnectorContract("shopify")?.displayName).toBe("Shopify");
+    expect(getConnectorContract("square")?.displayName).toBe("Square");
+    expect(getConnectorContract("odoo")?.displayName).toBe("Odoo");
+  });
+
   it("returns null for an unregistered connector id", () => {
     expect(getConnectorContract("does-not-exist")).toBeNull();
   });
