@@ -124,6 +124,15 @@ companies/{companyId}/apps/restaurant/orderMeta/{draftId}
   # Fields here are exactly the ones Core structurally cannot own; Core's own order
   # document remains the sole source of truth for lines, totals, and status.
 
+# --- Retail (Phase 4.1, implemented; see docs/phases/PHASE_4_PLAN.md) ---
+# No collection. Payment/tender (the one piece of data a retail sale would
+# otherwise need that Core doesn't already model) is out of scope this
+# phase -- Retail has no field Core's own Order doesn't already own, so it
+# has no App-owned Firestore data at all. Order existence/lines/totals/
+# status are read directly from Core (companies/{companyId}/orders/{orderId}
+# and its lines subcollection above); Core's own idempotencyKeys mechanism
+# (Phase 3) is reused as-is for duplicate-checkout protection.
+
 # --- Future verticals (not yet implemented) ---
 companies/{companyId}/apps/kitchenDisplay/tickets/{ticketId}
 companies/{companyId}/apps/loyalty/programs/{programId}
