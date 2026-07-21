@@ -110,8 +110,28 @@ describe("session", () => {
       verifySessionCookieMock.mockResolvedValue({ uid: "uid-1", email: "a@example.com" });
       const { getSession } = await import("./session");
 
-      await expect(getSession()).resolves.toEqual({ uid: "uid-1", email: "a@example.com" });
+      await expect(getSession()).resolves.toEqual({
+        uid: "uid-1",
+        email: "a@example.com",
+        superAdmin: false,
+      });
       expect(verifySessionCookieMock).toHaveBeenCalledWith("valid-cookie", true);
+    });
+
+    it("exposes the superAdmin custom claim when present", async () => {
+      mockCookieStore._store.set("session", "valid-cookie");
+      verifySessionCookieMock.mockResolvedValue({
+        uid: "uid-1",
+        email: "a@example.com",
+        superAdmin: true,
+      });
+      const { getSession } = await import("./session");
+
+      await expect(getSession()).resolves.toEqual({
+        uid: "uid-1",
+        email: "a@example.com",
+        superAdmin: true,
+      });
     });
 
     it("returns null on an invalid/tampered cookie", async () => {
@@ -153,7 +173,11 @@ describe("session", () => {
       verifySessionCookieMock.mockResolvedValue({ uid: "uid-1", email: null });
       const { requireSession } = await import("./session");
 
-      await expect(requireSession()).resolves.toEqual({ uid: "uid-1", email: null });
+      await expect(requireSession()).resolves.toEqual({
+        uid: "uid-1",
+        email: null,
+        superAdmin: false,
+      });
     });
 
     it("redirects to /login when there is no valid session", async () => {

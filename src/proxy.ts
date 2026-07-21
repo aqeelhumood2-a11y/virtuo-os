@@ -21,8 +21,8 @@ import { generateCsrfToken } from "@/core/auth/csrf";
 // caught during Phase 1B's manual verification. Each auth page instead
 // calls the authoritative getSession() itself (a read-only call, legal in
 // a Server Component) to decide whether to redirect to /account.
-const PROTECTED_ROUTES = ["/account"];
-const CSRF_ROUTES = ["/account", "/login", "/register", "/reset-password"];
+const PROTECTED_ROUTES = ["/account", "/onboarding"];
+const CSRF_ROUTES = ["/account", "/onboarding", "/login", "/register", "/reset-password"];
 
 function matchesRoute(pathname: string, routes: string[]): boolean {
   return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
@@ -54,5 +54,13 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/account", "/account/:path*", "/login", "/register", "/reset-password"],
+  matcher: [
+    "/account",
+    "/account/:path*",
+    "/onboarding",
+    "/onboarding/:path*",
+    "/login",
+    "/register",
+    "/reset-password",
+  ],
 };

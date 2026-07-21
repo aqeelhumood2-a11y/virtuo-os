@@ -2,13 +2,315 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default: authenticated users can only read/write their own user document.
-    // Tighten or extend per-collection as real data models are added.
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    // --- Shared helpers -----------------------------------------------
+    // One definition of each check, reused across every match block below
+    // (mirrors the single-source-of-truth principle used for the
+    // capability matrix elsewhere in Core).
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Deny everything else by default until explicit rules are added.
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // SuperAdmin is a global custom claim, never a membership role (1D,
+    // mirrors core/roles-permissions) -- it grants a cross-tenant *read*
+    // bypass only; no write path in this file checks it.
+    function isSuperAdmin() {
+      // Defends two distinct edge cases, both observed to throw rather
+      // than evaluate falsy: (1) request.auth.token itself can be null for
+      // a caller with no custom claims at all (as opposed to a present
+      // empty map), and (2) a claim key that was genuinely never set is an
+      // absent map key, not a present-but-null one. Both matter here
+      // specifically because this function is combined with `||`, and the
+      // rules emulator does not reliably short-circuit a custom-function
+      // right-hand side -- it can still be evaluated even when the
+      // left-hand side (e.g. isActiveMember()) is already true.
+      return isSignedIn()
+        && request.auth.token != null
+        && ('superAdmin' in request.auth.token)
+        && request.auth.token.superAdmin == true;
+    }
+
+    function membershipDoc(companyId) {
+      return /databases/$(database)/documents/companies/$(companyId)/memberships/$(request.auth.uid);
+    }
+
+    function isActiveMember(companyId) {
+      return isSignedIn()
+        && exists(membershipDoc(companyId))
+        && get(membershipDoc(companyId)).data.status == 'active';
+    }
+
+    function memberRole(companyId) {
+      return get(membershipDoc(companyId)).data.role;
+    }
+
+    // Mirrors core/companies/membership.ts's hasBranchAccess(): an empty
+    // branchIds list means "every branch" (1C's default for the bootstrap
+    // Owner and any unscoped member); a non-empty list restricts reads to
+    // exactly those branches. Used only by 1E's branch-scoped collections
+    // (stock, inventoryMovements) -- company/branch/membership docs
+    // themselves aren't branch-scoped data.
+    function memberBranchIds(companyId) {
+      return get(membershipDoc(companyId)).data.branchIds;
+    }
+
+    function hasBranchAccess(companyId, branchId) {
+      return isActiveMember(companyId)
+        && (memberBranchIds(companyId).size() == 0 || branchId in memberBranchIds(companyId));
+    }
+
+    // Hand-maintained mirror of core/roles-permissions/matrix.ts's
+    // ROLE_CAPABILITIES -- rules can't import TypeScript, so this list must
+    // be kept in sync by hand whenever the matrix changes. Only the one
+    // capability this file actually needs to check is modeled here
+    // (audit.view); every other collection's writes are Admin-SDK-only
+    // (allow write: if false below), including companies as of 1G (see
+    // that match block), so their capabilities never need a rules-side
+    // equivalent.
+    function roleCapabilities(role) {
+      return (role == 'Owner' || role == 'Manager') ? ['audit.view'] : [];
+    }
+
+    function hasCapability(companyId, capability) {
+      return isActiveMember(companyId) && capability in roleCapabilities(memberRole(companyId));
+    }
+
+    // Hand-maintained mirror of Platform's OWN capability matrix
+    // (platform/shared/require-platform-capability.ts's
+    // PLATFORM_ROLE_CAPABILITIES) -- deliberately a SEPARATE function from
+    // roleCapabilities()/hasCapability() above, never merged with them.
+    // Core's capability matrix must never gain an entry for something
+    // Platform owns (licenses/apps/connectors are commercial concepts Core
+    // has no knowledge of -- see docs/phases/PHASE_2_PLAN.md §8). Only
+    // licenses.view is modeled here: every write to Platform's collections
+    // below is Admin-SDK-only regardless of role, so no other Platform
+    // capability needs a rules-side equivalent, and apps/connectors reads
+    // are simply gated by isActiveMember() (low-sensitivity, same tier as
+    // branches), not a capability at all.
+    function platformRoleCapabilities(role) {
+      return (role == 'Owner' || role == 'Manager') ? ['licenses.view'] : [];
+    }
+
+    function hasPlatformCapability(companyId, capability) {
+      return isActiveMember(companyId) && capability in platformRoleCapabilities(memberRole(companyId));
+    }
+
+    // --- users/{uid} -----------------------------------------------------
+    // Self-read-only: there is no legitimate reason in this phase for one
+    // user to read another user's profile document, and this also means a
+    // compromised client can never enumerate other users via Firestore.
+    // Write is unconditionally denied: every legitimate write (onboarding's
+    // upsert, a self-only displayName edit) goes through server code using
+    // the Admin SDK, which is not subject to these rules at all -- this
+    // rule's only job is to block *direct client* writes, never authored
+    // to express the real authorization logic (that lives server-side).
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+
+      // --- Notifications (1G) ---------------------------------------------
+      // Per-user, not per-company -- a user sees their own notifications
+      // across every company they belong to. Self-only read, same as the
+      // parent profile document; marking as read goes through
+      // core/notifications's markAsRead()/markAllAsRead() (Admin SDK), so
+      // writes stay denied here too.
+      match /notifications/{notificationId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+    }
+
+    match /companies/{companyId} {
+      // Company existence/name is tenant data, not public -- membership
+      // (active OR suspended company) is required to read it at all, so an
+      // Owner can still see their own suspended company. SuperAdmin reads
+      // across every company regardless of membership (1D, support/ops).
+      allow read: if isActiveMember(companyId) || isSuperAdmin();
+
+      // Onboarding is the only creation path and it runs entirely
+      // server-side inside a single Firestore transaction that also reads
+      // a *different* document (users/{uid}) to guard against duplicate
+      // onboarding -- that precondition cannot be expressed as a
+      // per-document Security Rule in a way that stays race-safe, so
+      // creation is Admin-SDK-only.
+      allow create: if false;
+
+      // 1D allowed a direct, capability-gated client write here for
+      // rename/suspend. 1G removes that: a direct write has no server-side
+      // interception point to audit-log from, and "every mutation from
+      // 1B-1F is audited, no exceptions" (docs/phases/PHASE_1G_PLAN.md §2)
+      // doesn't hold with an un-auditable path left standing. Rename/
+      // suspend now go through updateCompanyAction/suspendCompanyAction
+      // (Admin SDK + audit log, same as every other mutation in Core).
+      allow update: if false;
+
+      // No hard delete anywhere in 1C -- soft-deactivation via the update
+      // rule above (status -> 'suspended') is the only "deletion."
+      allow delete: if false;
+
+      match /branches/{branchId} {
+        // The branch document itself (name, active flag) is low-sensitivity
+        // company metadata every member should be able to see; branchIds
+        // scoping (via each member's own membership document) matters for
+        // *operational data* nested under a branch in later phases, not for
+        // the visibility of the branch document itself. SuperAdmin read
+        // bypass mirrors the parent company (1D).
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+
+        // 1C creates exactly one branch (the onboarding transaction's
+        // default branch) and has no "add another branch" UI yet.
+        allow write: if false;
+      }
+
+      match /memberships/{memberUid} {
+        // Any active member can see the roster (role/branchIds) -- this is
+        // not a user-profile read (see users/{uid} above), just "who is on
+        // this team and what's their role." SuperAdmin read bypass mirrors
+        // the parent company (1D).
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+
+        // Created by the onboarding transaction (1C); role/status changes
+        // now flow through capability-gated server actions (1D) -- both
+        // remain Admin-SDK-only, so direct client writes stay denied here.
+        allow write: if false;
+      }
+
+      // --- Inventory Engine (1E) -----------------------------------------
+      // Company-wide catalog -- every active member can see it (item
+      // identity/pricing isn't branch-sensitive), no branch scoping needed.
+      match /inventoryItems/{itemId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Stock and movements ARE branch-sensitive: this is the first use of
+      // the branchIds scoping promised back in 1C's membership rule
+      // comment. All mutation is Admin-SDK-only -- every stock change runs
+      // inside a Firestore transaction (stock update + movement write
+      // together) in core/inventory-engine, an atomicity guarantee that
+      // can't be expressed as a per-document Security Rule.
+      match /stock/{stockId} {
+        allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Append-only audit trail -- no update/delete path exists anywhere,
+      // including server-side.
+      match /inventoryMovements/{movementId} {
+        allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // --- Order Engine (1F) ----------------------------------------------
+      // Branch-sensitive, same pattern as stock/inventoryMovements above.
+      // All mutation is Admin-SDK-only: creating an order, completing it
+      // (which deducts stock through the Inventory Engine in the same
+      // transaction), and voiding it are all multi-document, atomicity-
+      // dependent operations that can't be expressed as a per-document
+      // Security Rule.
+      match /orders/{orderId} {
+        allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+        allow write: if false;
+
+        // Lines carry their own denormalized branchId (copied from the
+        // parent order at write time) so this rule never needs a parent
+        // lookup -- same reasoning as inventoryMovements carrying its own
+        // branchId instead of requiring a join back to `stock`.
+        match /lines/{lineId} {
+          allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+          allow write: if false;
+        }
+      }
+
+      // Core's own generic, business-agnostic exactly-once mechanism (3) --
+      // not App-owned, not a general key-value store. Only ever read/written
+      // from inside the Admin-SDK transaction of the operation that owns a
+      // given key (see core/order-engine/application/orders.ts's
+      // createOrder). No client ever needs to read this directly; SuperAdmin
+      // read is for ops/debugging only.
+      match /idempotencyKeys/{key} {
+        allow read: if isSuperAdmin();
+        allow write: if false;
+      }
+
+      // --- Audit Logs (1G) -------------------------------------------------
+      // Not branch-scoped (an audit trail spans the whole company); gated
+      // by audit.view instead (Owner/Manager only -- audit history is
+      // manager-level visibility, not frontline). Written exclusively by
+      // core/audit-logs's writeAuditInTransaction(), always inside the same
+      // transaction as the mutation it records -- never a standalone write,
+      // so this rule never needs to allow one.
+      match /auditLogs/{logId} {
+        allow read: if hasCapability(companyId, 'audit.view') || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // --- Platform (2) -----------------------------------------------------
+      // Entitlement only (plan, entitledApps/entitledConnectors, seats) --
+      // never install state, which lives exclusively in apps/connectors
+      // below (see docs/phases/PHASE_2_PLAN.md §2/§7). Closer to billing-
+      // tier information than to "which apps are on," so gated by
+      // licenses.view (Owner/Manager) rather than plain membership. Write
+      // is Admin-SDK-only: license provisioning is ops/SuperAdmin tooling,
+      // never an in-app mutation in Phase 2.
+      match /licenses/{licenseId} {
+        allow read: if hasPlatformCapability(companyId, 'licenses.view') || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // The sole source of truth for installed-App state -- any active
+      // member can see what's installed (low-sensitivity, same tier as
+      // branches), but only platform/app-installs (Admin SDK) ever writes
+      // it, whether via a capability-gated install/uninstall or a Super
+      // Admin force-toggle.
+      match /apps/{appId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+
+        // --- Restaurant App (3) -----------------------------------------
+        // App-owned metadata Core structurally cannot hold (order type,
+        // table reference, guest count, kitchen note) -- keyed by the
+        // client-originated draftId, never Core's own orderId, so this
+        // never needs a parent-order lookup. Same visibility tier as
+        // orders/stock: branch-scoped, Admin-SDK-only writes (every write
+        // goes through order-ticket.service.ts, which pairs it with Core's
+        // own createOrder call inside one Firestore transaction where the
+        // metadata is a repair, or a plain idempotent set otherwise -- see
+        // docs/phases/PHASE_3_PLAN.md's idempotency/consistency model).
+        match /orderMeta/{draftId} {
+          allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+          allow write: if false;
+        }
+      }
+
+      // Connection state only -- credentials are never stored here, only
+      // an opaque credentialRef (see docs/DATABASE.md §5). Same visibility
+      // tier as apps/ above.
+      match /connectors/{connectorId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+      }
+
+      // Company tenant configuration (branding now; localization/tax/
+      // numbering/receipts/currencies/printing/regional later), one
+      // document per settingId -- owned by core/companies/company-settings.ts,
+      // not Platform (this is not a commercial concept). Same visibility
+      // tier as branches; every write goes through updateCompanyBranding()
+      // (Admin SDK).
+      match /settings/{settingId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+      }
+    }
+
+    // Default deny: anything not explicitly matched above (including any
+    // future top-level collection added without updating this file) has no
+    // access at all.
     match /{document=**} {
       allow read, write: if false;
     }
