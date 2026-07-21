@@ -3,6 +3,22 @@
 // ever writes it. See docs/DATABASE.md.
 export type MovementType = "receive" | "adjust" | "transfer" | "waste" | "sale";
 
+// Colocated with MovementType rather than centrally maintained in
+// core/audit-logs -- adding a new inventory mutation means extending this
+// union right here, next to the code that produces it, never editing a
+// file in a different module. core/audit-logs/audit-log.types.ts unions
+// this into the public AuditAction type; see the comment there.
+export type InventoryAuditAction =
+  | "inventory.itemCreated"
+  | "inventory.itemUpdated"
+  | "inventory.itemDeactivated"
+  | "inventory.stockReceived"
+  | "inventory.stockWasted"
+  | "inventory.stockAdjusted"
+  | "inventory.stockCounted"
+  | "inventory.stockTransferred"
+  | "inventory.stockSold";
+
 export type InventoryItem = {
   id: string;
   sku: string;

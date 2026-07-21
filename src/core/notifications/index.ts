@@ -2,6 +2,7 @@ export {
   createNotification,
   createNotificationInTransaction,
   listNotifications,
+  listNotificationsPage,
   markAllAsRead,
   markAsRead,
 } from "./notification.repository";

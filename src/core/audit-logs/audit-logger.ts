@@ -3,7 +3,9 @@ import "server-only";
 import { FieldValue, type DocumentData, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { applyCursor, DEFAULT_PAGE_SIZE } from "@/lib/firebase/pagination";
 import { requireCapability } from "@/core/roles-permissions";
+import type { Page, PageOptions } from "@/shared/types";
 
 import type { AuditAction, AuditLogEntry, AuditTargetType } from "./audit-log.types";
 
@@ -51,11 +53,35 @@ function toAuditLogEntry(id: string, data: DocumentData): AuditLogEntry {
   };
 }
 
-// The one read entry point -- gated by audit.view (Owner/Manager only),
-// unlike the write side, which has no capability of its own since it's
-// never called directly by a client action.
+// The original read entry point -- gated by audit.view (Owner/Manager
+// only), unlike the write side, which has no capability of its own since
+// it's never called directly by a client action. Unpaginated and
+// unordered, kept exactly as-is (existing callers, existing behavior) now
+// that listAuditLogsPage() below exists for anything that needs bounded,
+// ordered reads -- a full-list read of a single company's log is still a
+// reasonable thing to want (e.g. an export), so this isn't deprecated.
 export async function listAuditLogs(companyId: string): Promise<AuditLogEntry[]> {
   await requireCapability(companyId, "audit.view");
   const snap = await auditLogsCollection(companyId).get();
   return snap.docs.map((doc) => toAuditLogEntry(doc.id, doc.data()));
+}
+
+// The pagination-ready read entry point, added ahead of any real UI so the
+// eventual audit-log screen never needs a breaking API change: newest
+// first (`createdAt desc`, server-side sort), bounded by `limit` (server-
+// side), and cursor-resumable. The cursor is just the last entry's own doc
+// ID -- resolved back to a DocumentSnapshot for Query.startAfter(), the
+// standard Firestore cursor pattern, so pagination is stable even if two
+// entries share a `createdAt` value.
+export async function listAuditLogsPage(companyId: string, opts: PageOptions = {}): Promise<Page<AuditLogEntry>> {
+  await requireCapability(companyId, "audit.view");
+  const limit = opts.limit ?? DEFAULT_PAGE_SIZE;
+
+  const collectionRef = auditLogsCollection(companyId);
+  const query = await applyCursor(collectionRef, collectionRef.orderBy("createdAt", "desc").limit(limit), opts.cursor);
+
+  const snap = await query.get();
+  const items = snap.docs.map((doc) => toAuditLogEntry(doc.id, doc.data()));
+  const nextCursor = snap.docs.length === limit ? snap.docs[snap.docs.length - 1].id : null;
+  return { items, nextCursor };
 }

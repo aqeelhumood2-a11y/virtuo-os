@@ -95,6 +95,35 @@ describe.skipIf(!IS_EMULATOR)("audit-logs (Firestore Emulator)", () => {
     expect(logs).toHaveLength(0);
   });
 
+  it("paginates newest-first with a stable cursor, covering every entry exactly once", async () => {
+    const companyId = `company-${randomUUID()}`;
+    const uid = `uid-${randomUUID()}`;
+    await seedCompanyAndMember(companyId, uid, "Owner");
+    requireSessionMock.mockResolvedValue({ uid, email: null, superAdmin: false });
+
+    const { updateCompanyName } = await import("../companies/company");
+    const { listAuditLogsPage } = await import("./audit-logger");
+
+    for (let i = 0; i < 5; i++) {
+      await updateCompanyName(companyId, `Name ${i}`);
+    }
+
+    const page1 = await listAuditLogsPage(companyId, { limit: 2 });
+    expect(page1.items).toHaveLength(2);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await listAuditLogsPage(companyId, { limit: 2, cursor: page1.nextCursor! });
+    expect(page2.items).toHaveLength(2);
+    expect(page2.nextCursor).not.toBeNull();
+
+    const page3 = await listAuditLogsPage(companyId, { limit: 2, cursor: page2.nextCursor! });
+    expect(page3.items).toHaveLength(1);
+    expect(page3.nextCursor).toBeNull();
+
+    const seenIds = [...page1.items, ...page2.items, ...page3.items].map((entry) => entry.id);
+    expect(new Set(seenIds).size).toBe(5);
+  });
+
   it("gates listAuditLogs behind audit.view -- Owner/Manager can read, Employee cannot", async () => {
     const ownerCompanyId = `company-${randomUUID()}`;
     const ownerUid = `uid-${randomUUID()}`;

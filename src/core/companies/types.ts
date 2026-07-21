@@ -46,3 +46,17 @@ export type CompanyActionFormState = {
   error?: string;
   success?: string;
 };
+
+// Colocated with the rest of this module's own vocabulary (Company,
+// Membership) rather than centrally maintained in core/audit-logs -- adding
+// a new company/membership mutation means extending these two unions right
+// here, next to the code that produces them, never editing a file in a
+// different module. core/audit-logs/audit-log.types.ts unions these into
+// the public AuditAction type; see the comment there.
+export type CompanyAuditAction =
+  | "company.onboarded"
+  | "company.updated"
+  | "company.suspended"
+  | "company.reactivated";
+
+export type MembershipAuditAction = "membership.roleUpdated" | "membership.deactivated";

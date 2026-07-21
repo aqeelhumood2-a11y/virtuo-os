@@ -1,5 +1,12 @@
 export type OrderStatus = "pending" | "completed" | "voided";
 
+// Colocated with OrderStatus rather than centrally maintained in
+// core/audit-logs -- adding a new order mutation means extending this
+// union right here, next to the code that produces it, never editing a
+// file in a different module. core/audit-logs/audit-log.types.ts unions
+// this into the public AuditAction type; see the comment there.
+export type OrderAuditAction = "order.created" | "order.lineAdded" | "order.completed" | "order.voided";
+
 export type OrderTotals = {
   subtotal: number;
   tax: number;

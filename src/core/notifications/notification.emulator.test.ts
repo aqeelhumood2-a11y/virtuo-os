@@ -88,4 +88,77 @@ describe.skipIf(!IS_EMULATOR)("notifications (Firestore Emulator)", () => {
 
     await expect(listNotifications(otherUid)).resolves.toEqual([]);
   });
+
+  it("paginates newest-first with a stable cursor, covering every notification exactly once", async () => {
+    const uid = `uid-${randomUUID()}`;
+    const { createNotification, listNotificationsPage } = await import("./notification.repository");
+
+    for (let i = 0; i < 5; i++) {
+      await createNotification(uid, { title: `Notification ${i}`, body: "..." });
+    }
+
+    const page1 = await listNotificationsPage(uid, { limit: 2 });
+    expect(page1.items).toHaveLength(2);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await listNotificationsPage(uid, { limit: 2, cursor: page1.nextCursor! });
+    expect(page2.items).toHaveLength(2);
+    expect(page2.nextCursor).not.toBeNull();
+
+    const page3 = await listNotificationsPage(uid, { limit: 2, cursor: page2.nextCursor! });
+    expect(page3.items).toHaveLength(1);
+    expect(page3.nextCursor).toBeNull();
+
+    const seenIds = [...page1.items, ...page2.items, ...page3.items].map((n) => n.id);
+    expect(new Set(seenIds).size).toBe(5);
+  });
+
+  it("paginates the unread-only filter too, server-side filtered and ordered", async () => {
+    const uid = `uid-${randomUUID()}`;
+    const { createNotification, markAsRead, listNotifications, listNotificationsPage } = await import(
+      "./notification.repository"
+    );
+
+    for (let i = 0; i < 4; i++) {
+      await createNotification(uid, { title: `Notification ${i}`, body: "..." });
+    }
+    const [firstUnread] = await listNotifications(uid, { unreadOnly: true });
+    await markAsRead(uid, firstUnread.id);
+
+    const page = await listNotificationsPage(uid, { unreadOnly: true, limit: 10 });
+    expect(page.items).toHaveLength(3);
+    expect(page.items.every((n) => !n.read)).toBe(true);
+  });
+
+  it(
+    "markAllAsRead marks every notification read even when there are more than 500 (chunked batches)",
+    async () => {
+      const uid = `uid-${randomUUID()}`;
+      const { adminDb } = await import("@/lib/firebase/admin");
+      const { FieldValue } = await import("firebase-admin/firestore");
+      const { markAllAsRead, listNotifications } = await import("./notification.repository");
+
+      // Seeded directly via chunked batched writes rather than 600
+      // individual createNotification() calls -- creation isn't under test
+      // here, only that markAllAsRead correctly marks all of them read
+      // despite exceeding a single Firestore WriteBatch's 500-operation cap.
+      const COUNT = 600;
+      const notificationsRef = adminDb.collection("users").doc(uid).collection("notifications");
+      const refs = Array.from({ length: COUNT }, () => notificationsRef.doc());
+      for (let i = 0; i < refs.length; i += 500) {
+        const batch = adminDb.batch();
+        refs.slice(i, i + 500).forEach((ref) => {
+          batch.set(ref, { title: "x", body: "y", channel: "in-app", readAt: null, createdAt: FieldValue.serverTimestamp() });
+        });
+        await batch.commit();
+      }
+
+      await markAllAsRead(uid);
+
+      const all = await listNotifications(uid);
+      expect(all).toHaveLength(COUNT);
+      expect(all.every((n) => n.read)).toBe(true);
+    },
+    30000,
+  );
 });

@@ -5,8 +5,13 @@ const sendInAppInTransactionMock = vi.fn();
 const notificationsCollectionMock = vi.fn();
 
 const docUpdateMock = vi.fn();
+const docGetMock = vi.fn();
 const whereGetMock = vi.fn();
 const collectionGetMock = vi.fn();
+const whereMock = vi.fn();
+const orderByMock = vi.fn();
+const limitMock = vi.fn();
+const startAfterMock = vi.fn();
 const batchUpdateMock = vi.fn();
 const batchCommitMock = vi.fn();
 
@@ -25,12 +30,49 @@ vi.mock("@/lib/firebase/admin", () => ({
   },
 }));
 
+// A chainable fake query, same shape as core/audit-logs' equivalent mock:
+// orderBy()/limit()/startAfter() each return the same ref so they compose,
+// while `terminalGetMock` lets a `.where(...)`-derived chain and a plain
+// chain resolve to two distinct spies -- preserving the existing
+// whereGetMock/collectionGetMock distinction the pre-pagination tests rely
+// on (filtered vs. unfiltered reads).
+function makeChain(terminalGetMock: () => unknown) {
+  const ref = {
+    get: () => terminalGetMock(),
+    orderBy: (...args: unknown[]) => {
+      orderByMock(...args);
+      return ref;
+    },
+    limit: (...args: unknown[]) => {
+      limitMock(...args);
+      return ref;
+    },
+    startAfter: (...args: unknown[]) => {
+      startAfterMock(...args);
+      return ref;
+    },
+  };
+  return ref;
+}
+
 beforeEach(() => {
   vi.resetModules();
+  docGetMock.mockResolvedValue({ exists: false });
   notificationsCollectionMock.mockReturnValue({
-    doc: () => ({ update: (...args: unknown[]) => docUpdateMock(...args) }),
-    where: () => ({ get: () => whereGetMock() }),
+    doc: (id?: string) => ({
+      id: id ?? "generated-notif-id",
+      update: (...args: unknown[]) => docUpdateMock(...args),
+      get: () => docGetMock(),
+    }),
     get: () => collectionGetMock(),
+    where: (...args: unknown[]) => {
+      whereMock(...args);
+      return makeChain(whereGetMock);
+    },
+    orderBy: (...args: unknown[]) => {
+      orderByMock(...args);
+      return makeChain(collectionGetMock);
+    },
   });
 });
 
@@ -101,6 +143,84 @@ describe("listNotifications", () => {
   });
 });
 
+describe("listNotificationsPage", () => {
+  it("orders newest-first and limits to the requested page size, unfiltered by default", async () => {
+    collectionGetMock.mockResolvedValue({ docs: [] });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    await listNotificationsPage("uid-1", { limit: 10 });
+
+    expect(orderByMock).toHaveBeenCalledWith("createdAt", "desc");
+    expect(limitMock).toHaveBeenCalledWith(10);
+    expect(whereMock).not.toHaveBeenCalled();
+  });
+
+  it("applies the unread filter, still ordered and limited server-side, when unreadOnly is set", async () => {
+    whereGetMock.mockResolvedValue({ docs: [] });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    await listNotificationsPage("uid-1", { unreadOnly: true, limit: 5 });
+
+    expect(whereMock).toHaveBeenCalledWith("readAt", "==", null);
+    expect(orderByMock).toHaveBeenCalledWith("createdAt", "desc");
+    expect(limitMock).toHaveBeenCalledWith(5);
+    expect(collectionGetMock).not.toHaveBeenCalled();
+  });
+
+  it("defaults to a page size of 50 when no limit is given", async () => {
+    collectionGetMock.mockResolvedValue({ docs: [] });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    await listNotificationsPage("uid-1");
+    expect(limitMock).toHaveBeenCalledWith(50);
+  });
+
+  it("returns nextCursor as the last item's id when a full page comes back", async () => {
+    collectionGetMock.mockResolvedValue({
+      docs: [
+        { id: "n-1", data: () => ({ title: "a", body: "b", channel: "in-app", readAt: null }) },
+        { id: "n-2", data: () => ({ title: "a", body: "b", channel: "in-app", readAt: null }) },
+      ],
+    });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    const page = await listNotificationsPage("uid-1", { limit: 2 });
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toBe("n-2");
+  });
+
+  it("returns nextCursor: null when fewer docs than the limit come back (last page)", async () => {
+    collectionGetMock.mockResolvedValue({
+      docs: [{ id: "n-1", data: () => ({ title: "a", body: "b", channel: "in-app", readAt: null }) }],
+    });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    const page = await listNotificationsPage("uid-1", { limit: 2 });
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("resolves a given cursor to a document snapshot and passes it to startAfter", async () => {
+    docGetMock.mockResolvedValue({ exists: true, id: "n-1" });
+    collectionGetMock.mockResolvedValue({ docs: [] });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    await listNotificationsPage("uid-1", { cursor: "n-1" });
+    expect(startAfterMock).toHaveBeenCalledWith({ exists: true, id: "n-1" });
+  });
+
+  it("ignores a cursor that no longer exists rather than throwing", async () => {
+    docGetMock.mockResolvedValue({ exists: false });
+    collectionGetMock.mockResolvedValue({ docs: [] });
+    const { listNotificationsPage } = await import("./notification.repository");
+
+    await expect(listNotificationsPage("uid-1", { cursor: "ghost" })).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    expect(startAfterMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("markAsRead", () => {
   it("sets readAt on the target notification doc", async () => {
     const { markAsRead } = await import("./notification.repository");
@@ -133,5 +253,27 @@ describe("markAllAsRead", () => {
 
     expect(batchUpdateMock).not.toHaveBeenCalled();
     expect(batchCommitMock).not.toHaveBeenCalled();
+  });
+
+  it("uses exactly one batch when the unread count is at the 500-op limit", async () => {
+    const docs = Array.from({ length: 500 }, (_, i) => ({ ref: `ref-${i}` }));
+    whereGetMock.mockResolvedValue({ empty: false, docs });
+    const { markAllAsRead } = await import("./notification.repository");
+
+    await markAllAsRead("uid-1");
+
+    expect(batchUpdateMock).toHaveBeenCalledTimes(500);
+    expect(batchCommitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("splits more than 500 unread docs into multiple <=500-op batches", async () => {
+    const docs = Array.from({ length: 600 }, (_, i) => ({ ref: `ref-${i}` }));
+    whereGetMock.mockResolvedValue({ empty: false, docs });
+    const { markAllAsRead } = await import("./notification.repository");
+
+    await markAllAsRead("uid-1");
+
+    expect(batchUpdateMock).toHaveBeenCalledTimes(600);
+    expect(batchCommitMock).toHaveBeenCalledTimes(2);
   });
 });

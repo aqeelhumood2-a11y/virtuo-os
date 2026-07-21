@@ -11,17 +11,20 @@ export {
 export { getSession, requireSession } from "./auth/session";
 export type { AuthFormState, AuthSession } from "./auth/types";
 
-export { listAuditLogs, writeAuditInTransaction } from "./audit-logs";
+export { listAuditLogs, listAuditLogsPage, writeAuditInTransaction } from "./audit-logs";
 export type { AuditAction, AuditLogEntry, AuditLogParams, AuditTargetType } from "./audit-logs";
 
 export {
   createNotification,
   createNotificationInTransaction,
   listNotifications,
+  listNotificationsPage,
   markAllAsRead,
   markAsRead,
 } from "./notifications";
 export type { CreateNotificationInput, Notification, NotificationChannel, RelatedEntity } from "./notifications";
+
+export type { Page, PageOptions } from "@/shared/types";
 
 export { createCompanyAction, suspendCompanyAction, updateCompanyAction } from "./companies/actions";
 export { setCompanyStatus, updateCompanyName } from "./companies/company";
@@ -41,8 +44,10 @@ export type {
   Branch,
   Company,
   CompanyActionFormState,
+  CompanyAuditAction,
   MemberActionFormState,
   Membership,
+  MembershipAuditAction,
   MembershipRole,
   OnboardingFormState,
   OnboardingResult,
@@ -75,6 +80,7 @@ export {
 export type {
   ApplyStockChangeParams,
   CreateItemInput,
+  InventoryAuditAction,
   InventoryItem,
   InventoryMovement,
   MovementType,
@@ -98,7 +104,15 @@ export {
   OrderNotFoundError,
   voidOrder,
 } from "./order-engine";
-export type { CreateOrderInput, Order, OrderLine, OrderLineInput, OrderStatus, OrderTotals } from "./order-engine";
+export type {
+  CreateOrderInput,
+  Order,
+  OrderAuditAction,
+  OrderLine,
+  OrderLineInput,
+  OrderStatus,
+  OrderTotals,
+} from "./order-engine";
 
 export { updateDisplayNameAction } from "./users/actions";
 export { getUserProfile } from "./users/profile";

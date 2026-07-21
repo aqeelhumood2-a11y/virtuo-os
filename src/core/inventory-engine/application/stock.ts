@@ -4,7 +4,6 @@ import { FieldValue, type DocumentReference, type Transaction } from "firebase-a
 
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditInTransaction } from "@/core/audit-logs";
-import type { AuditAction } from "@/core/audit-logs";
 import { BranchAccessDeniedError } from "@/core/companies/errors";
 import { hasBranchAccess } from "@/core/companies/membership";
 import type { CompanyMembershipContext } from "@/core/companies/membership";
@@ -13,7 +12,7 @@ import type { Capability } from "@/core/roles-permissions";
 
 import { ItemNotFoundError } from "../domain/errors";
 import { assertSufficientStock, computeCountDelta } from "../domain/stock-math";
-import type { InventoryMovement, MovementType, Stock } from "../domain/types";
+import type { InventoryAuditAction, InventoryMovement, MovementType, Stock } from "../domain/types";
 import {
   itemDoc,
   movementsCollection,
@@ -88,7 +87,7 @@ export type StockChangePlan = {
   performedBy: string;
 };
 
-const AUDIT_ACTION_BY_MOVEMENT_TYPE: Record<MovementType, AuditAction> = {
+const AUDIT_ACTION_BY_MOVEMENT_TYPE: Record<MovementType, InventoryAuditAction> = {
   receive: "inventory.stockReceived",
   waste: "inventory.stockWasted",
   adjust: "inventory.stockAdjusted",

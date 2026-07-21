@@ -1,27 +1,15 @@
-// The fixed vocabulary of auditable actions across Core, one entry per
-// mutation path in Phases 1C-1F. Extend here (never with a free-form
-// string) when a new mutation is added -- same reasoning as
-// inventory-engine's MovementType union.
-export type AuditAction =
-  | "company.onboarded"
-  | "company.updated"
-  | "company.suspended"
-  | "company.reactivated"
-  | "membership.roleUpdated"
-  | "membership.deactivated"
-  | "inventory.itemCreated"
-  | "inventory.itemUpdated"
-  | "inventory.itemDeactivated"
-  | "inventory.stockReceived"
-  | "inventory.stockWasted"
-  | "inventory.stockAdjusted"
-  | "inventory.stockCounted"
-  | "inventory.stockTransferred"
-  | "inventory.stockSold"
-  | "order.created"
-  | "order.lineAdded"
-  | "order.completed"
-  | "order.voided";
+import type { CompanyAuditAction, MembershipAuditAction } from "@/core/companies/types";
+import type { InventoryAuditAction } from "@/core/inventory-engine/domain/types";
+import type { OrderAuditAction } from "@/core/order-engine/domain/types";
+
+// The fixed vocabulary of auditable actions across Core, assembled from
+// each domain module's own action union rather than maintained as one flat
+// list here. Adding a new mutation means extending the *owning* module's
+// type (CompanyAuditAction, InventoryAuditAction, ...), right next to the
+// enum/union that already drives it (e.g. MovementType) -- never editing
+// this file, and never a free-form string. This file only re-exports the
+// union; it never defines a new action literal itself.
+export type AuditAction = CompanyAuditAction | MembershipAuditAction | InventoryAuditAction | OrderAuditAction;
 
 export type AuditTargetType = "company" | "membership" | "inventoryItem" | "stock" | "order";
 

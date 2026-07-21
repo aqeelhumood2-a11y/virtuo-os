@@ -6,9 +6,20 @@ import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditInTransaction } from "@/core/audit-logs";
 import { requireCapability } from "@/core/roles-permissions";
 
+import type { CompanyAuditAction } from "./types";
+
 function companyDoc(companyId: string) {
   return adminDb.collection("companies").doc(companyId);
 }
+
+// Exhaustive over Company['status'] -- same compile-time-safety pattern as
+// inventory-engine's AUDIT_ACTION_BY_MOVEMENT_TYPE: adding a third status
+// value without extending this map is a type error, not a silent gap in
+// audit coverage.
+const AUDIT_ACTION_BY_STATUS: Record<"active" | "suspended", CompanyAuditAction> = {
+  active: "company.reactivated",
+  suspended: "company.suspended",
+};
 
 // Both of these are the only two mutations 1C's Firestore rules ever
 // allowed a direct client write for (1D). Routing them through server code
@@ -52,7 +63,7 @@ export async function setCompanyStatus(companyId: string, status: "active" | "su
     writeAuditInTransaction(transaction, {
       companyId,
       actorId: session.uid,
-      action: status === "suspended" ? "company.suspended" : "company.reactivated",
+      action: AUDIT_ACTION_BY_STATUS[status],
       targetType: "company",
       targetId: companyId,
       before: { status: before.status },

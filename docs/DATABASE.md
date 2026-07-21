@@ -105,6 +105,8 @@ Rule: an App may create collections only under `companies/{companyId}/apps/{itsO
 
 **Implemented (Phase 1F):** none needed, same reasoning as 1E — `listOrdersForBranch` uses a single `branchId` equality filter.
 
+**Implemented (Phase 1G hardening):** one composite on `notifications` (a `queryScope: COLLECTION` index, so it applies to every user's `users/{uid}/notifications` subcollection, not just one): `(readAt ASC, createdAt DESC)`. Needed by `listNotificationsPage(uid, { unreadOnly: true })` — filtering on `readAt` and ordering by a different field (`createdAt`) is exactly the shape Firestore requires a composite index for; the unfiltered page (`listNotificationsPage` without `unreadOnly`) and `listAuditLogsPage` need no composite, since each is a single-field `orderBy` served by Firestore's automatic single-field indexes. See `docs/phases/PHASE_1G_HARDENING.md` §2.
+
 Anticipated for later phases, added only once a real query needs them:
 - `orders`: `(branchId ASC, status ASC, createdAt DESC)`, if a status-filtered or sorted order list is ever built
 - `inventoryMovements`: `(itemId ASC, createdAt DESC)`, if a cross-branch per-item history view is ever built

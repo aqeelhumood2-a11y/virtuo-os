@@ -17,4 +17,4 @@ export {
 export type { ApplyStockChangeParams, StockChangePlan } from "./application/stock";
 
 export { InsufficientStockError, ItemNotFoundError } from "./domain/errors";
-export type { InventoryItem, InventoryMovement, MovementType, Stock } from "./domain/types";
+export type { InventoryAuditAction, InventoryItem, InventoryMovement, MovementType, Stock } from "./domain/types";
