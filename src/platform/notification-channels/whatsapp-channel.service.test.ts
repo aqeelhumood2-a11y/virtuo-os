@@ -183,6 +183,43 @@ describe("syncWhatsAppNotifications", () => {
       expect.anything(),
       expect.objectContaining({ action: "notificationChannel.synced", after: { messagesSent: 2 } }),
     );
+
+    // The cursor advances once PER notification (immediately after each
+    // send attempt), not once after the whole batch -- so a process crash
+    // between two sends can only ever re-expose the single in-flight
+    // message next time, never the rest of an already-delivered batch.
+    expect(setSyncCursorMock.mock.calls).toEqual([
+      ["company-1", "owner-1", "n1"],
+      ["company-1", "owner-1", "n2"],
+    ]);
+  });
+
+  it("resuming from a cursor that already advanced past the first message never re-sends it (proves the crash-recovery bound)", async () => {
+    getWhatsAppChannelMock.mockResolvedValue({
+      status: "connected",
+      credentialRef: "ref-1",
+      config: { phoneNumberId: "123", toPhoneNumber: "15551234567" },
+    });
+    resolveConnectorCredentialMock.mockResolvedValue("tok");
+    listCompanyMembersMock.mockResolvedValue([{ uid: "owner-1", role: "Owner", branchIds: [], status: "active" }]);
+    // Simulates resuming after a crash that happened right after n1's
+    // cursor write succeeded but before n2 was ever attempted.
+    getSyncCursorMock.mockResolvedValue("n1");
+    listNotificationsPageMock.mockResolvedValue({
+      items: [
+        { id: "n2", title: "Void", body: "Order voided", channel: "in-app", read: false },
+        { id: "n1", title: "Install", body: "App installed", channel: "in-app", read: false },
+      ],
+      nextCursor: null,
+    });
+    sendWhatsAppMessageMock.mockResolvedValue(undefined);
+
+    const { syncWhatsAppNotifications } = await import("./whatsapp-channel.service");
+    const summary = await syncWhatsAppNotifications("company-1");
+
+    expect(sendWhatsAppMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppMessageMock).toHaveBeenCalledWith(expect.anything(), "Void: Order voided");
+    expect(summary.messagesSent).toBe(1);
   });
 
   it("stops walking backward once it reaches the stored cursor, and skips a failed send without aborting the rest", async () => {

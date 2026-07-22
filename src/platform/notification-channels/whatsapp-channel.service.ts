@@ -173,9 +173,19 @@ export async function syncWhatsAppNotifications(companyId: string): Promise<What
         // notifications and every other admin, same precedent as Phase 5's
         // per-order failure isolation.
       }
-    }
 
-    await setSyncCursor(companyId, admin.uid, newest[0].id);
+      // Advanced per-notification, not once after the whole batch: if the
+      // process crashes between two sends, only the single in-flight
+      // message (already attempted, cursor not yet advanced past it) is
+      // ever at risk of a resend on the next sync -- never the rest of an
+      // already-delivered batch. Meta's Cloud API gives us no send-side
+      // idempotency key to fall back on (unlike Square's, see Phase 5), so
+      // this is the tightest exposure window achievable without one: an
+      // at-least-once guarantee bounded to a single message, not "exactly
+      // once," and that bound is exactly this line's reason for being
+      // inside the loop instead of after it.
+      await setSyncCursor(companyId, admin.uid, notification.id);
+    }
   }
 
   const syncedAt = new Date().toISOString();
