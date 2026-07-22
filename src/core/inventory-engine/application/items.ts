@@ -15,6 +15,7 @@ export type CreateItemInput = {
   unit: string;
   category: string;
   defaultPrice: number;
+  barcode?: string;
 };
 
 // Items are company-wide (not branch-scoped) -- only capability-gated,
@@ -49,7 +50,9 @@ export async function createItem(companyId: string, input: CreateItemInput): Pro
 
 // sku is immutable identity, matching how ownerId/createdAt stay outside
 // every allowed-fields update elsewhere in Core (see companies/types.ts).
-export type UpdateItemInput = Partial<Pick<InventoryItem, "name" | "unit" | "category" | "defaultPrice">>;
+// barcode is included (Phase 6) so a company can attach/correct one on an
+// already-created item, not only at creation time.
+export type UpdateItemInput = Partial<Pick<InventoryItem, "name" | "unit" | "category" | "defaultPrice" | "barcode">>;
 
 export async function updateItem(companyId: string, itemId: string, input: UpdateItemInput): Promise<void> {
   const { session } = await requireCapability(companyId, "inventory.write");
@@ -105,4 +108,15 @@ export async function getItem(companyId: string, itemId: string): Promise<Invent
   const snap = await itemDoc(companyId, itemId).get();
   if (!snap.exists) return null;
   return toItem(snap.id, snap.data()!);
+}
+
+// Phase 6 (Barcode App): resolves a scanned barcode straight to its Item,
+// served by Firestore's automatic single-field index on `barcode` -- no
+// composite index needed, same reasoning as every other single-equality-
+// filter query in this engine (see docs/DATABASE.md §4).
+export async function getItemByBarcode(companyId: string, barcode: string): Promise<InventoryItem | null> {
+  await requireCapability(companyId, "inventory.view");
+  const snap = await itemsCollection(companyId).where("barcode", "==", barcode).limit(1).get();
+  if (snap.empty) return null;
+  return toItem(snap.docs[0].id, snap.docs[0].data());
 }

@@ -13,6 +13,7 @@
     "test:emulator": "firebase emulators:exec --project virtuo-os --only firestore,auth \"vitest run\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.5",
     "@google-cloud/secret-manager": "^6.3.0",
     "clsx": "^2.1.1",
     "firebase": "^12.16.0",

@@ -95,13 +95,13 @@ Implementation does not begin on 1A until explicitly approved. Each subsequent s
 
 **Milestone 5 (met):** Shopify and Square sync real external data bidirectionally (inbound product catalog, outbound completed-order push); Odoo does the same via JSON-RPC. Credentials are stored in Google Secret Manager, never Firestore. Sync is on-demand ("Sync Now"), not event-driven -- consistent with every prior phase's decision against new background infrastructure.
 
-## Phase 6 — Advanced Apps
-6.1 Kitchen Display (realtime order feed, built on Order Engine's realtime subscriptions).
-6.2 Barcode (scan-to-lookup/scan-to-sell, hooking into Inventory Engine).
-6.3 WhatsApp (order/notification channel via `core/notifications`).
-6.4 AI Assistant (Q&A / reporting layer over Core data).
+## Phase 6 — Advanced Apps (implemented; see `docs/phases/PHASE_6_PLAN.md`)
+6.1 Kitchen Display (implemented) -- realtime order feed. Required bridging the browser to a real Firebase Auth identity (a new, minimal `mintClientAuthToken` addition to `core/auth`) so the previously-unused client Firestore SDK could subscribe via `onSnapshot`, gated by the existing rules with zero rule changes -- see `PHASE_6_PLAN.md` §3.
+6.2 Barcode (implemented) -- scan-to-lookup/scan-to-sell, hooking into the Inventory and Order Engines exactly as Retail does. One small Core addition: an optional `InventoryItem.barcode` field + `getItemByBarcode` read.
+6.3 WhatsApp (implemented) -- a second `core/notifications` channel (not a Connector). Mirrors company admins' own notifications to one company-wide WhatsApp number via a lazy, on-demand sync in a new `platform/notification-channels` module, reusing Loyalty's own cursor-walk pattern applied to notifications instead of the audit log -- see `PHASE_6_PLAN.md` §5 for why this differs from the architecture proposal's original sketch (Core cannot import Platform to resolve a per-company credential, so the sync pulls from Core's own durable notification records instead of Core pushing to WhatsApp directly).
+6.4 AI Assistant (implemented) -- read-only Q&A/reporting layer over Core data, grounded only in the asking user's own already-capability-gated reads (orders/inventory/stock, and audit log only if the user already has audit.view). A single platform-wide Anthropic API key, not per-company.
 
-**Milestone 6:** Feature parity with a typical competitor POS/business platform for at least one fully-featured vertical.
+**Milestone 6 (met):** Kitchen Display, Barcode, WhatsApp, and AI Assistant are all real, working features on top of the existing Core/Platform/Connector/App architecture, with zero changes to Restaurant, Retail, or Loyalty and zero new Core capabilities (one new Platform capability, `notificationChannels.manage`).
 
 ## Phase 7 — Hardening & Scale
 7.1 Full automated test coverage (unit, integration, Firestore rules tests, e2e).

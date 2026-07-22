@@ -6,6 +6,7 @@ const setMock = vi.fn();
 const updateMock = vi.fn();
 const getMock = vi.fn();
 const collectionGetMock = vi.fn();
+const whereQueryGetMock = vi.fn();
 
 vi.mock("@/core/roles-permissions", () => ({
   requireCapability: (...args: unknown[]) => requireCapabilityMock(...args),
@@ -30,6 +31,9 @@ vi.mock("@/lib/firebase/admin", () => ({
             get: () => getMock(),
           }),
           get: () => collectionGetMock(),
+          where: () => ({
+            limit: () => ({ get: () => whereQueryGetMock() }),
+          }),
         }),
       }),
     }),
@@ -145,6 +149,48 @@ describe("getItem", () => {
       category: "general",
       defaultPrice: 9.99,
       isActive: true,
+    });
+  });
+});
+
+describe("getItemByBarcode", () => {
+  it("requires inventory.view and returns null when no item matches", async () => {
+    whereQueryGetMock.mockResolvedValue({ empty: true, docs: [] });
+    const { getItemByBarcode } = await import("./items");
+
+    await expect(getItemByBarcode("company-1", "012345678905")).resolves.toBeNull();
+    expect(requireCapabilityMock).toHaveBeenCalledWith("company-1", "inventory.view");
+  });
+
+  it("returns the mapped item for the matching barcode", async () => {
+    whereQueryGetMock.mockResolvedValue({
+      empty: false,
+      docs: [
+        {
+          id: "item-1",
+          data: () => ({
+            sku: "SKU-1",
+            name: "Widget",
+            unit: "each",
+            category: "general",
+            defaultPrice: 9.99,
+            isActive: true,
+            barcode: "012345678905",
+          }),
+        },
+      ],
+    });
+    const { getItemByBarcode } = await import("./items");
+
+    await expect(getItemByBarcode("company-1", "012345678905")).resolves.toEqual({
+      id: "item-1",
+      sku: "SKU-1",
+      name: "Widget",
+      unit: "each",
+      category: "general",
+      defaultPrice: 9.99,
+      isActive: true,
+      barcode: "012345678905",
     });
   });
 });

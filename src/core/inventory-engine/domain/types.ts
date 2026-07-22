@@ -27,6 +27,13 @@ export type InventoryItem = {
   category: string;
   defaultPrice: number;
   isActive: boolean;
+  // Optional, additive (Phase 6 -- Barcode App). Deliberately distinct from
+  // sku: a barcode is the physical symbology (UPC/EAN/etc.) a scanner
+  // reads, which frequently differs from an item's own internal catalog
+  // code. Business-agnostic the same way sku/unit/category are -- not a
+  // Barcode-App-specific field bolted on, a genuine Core concept the App
+  // merely happens to be the first to need. See docs/phases/PHASE_6_PLAN.md §4.
+  barcode?: string;
 };
 
 export type Stock = {

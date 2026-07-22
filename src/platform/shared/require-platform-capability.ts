@@ -9,17 +9,19 @@ import type { Role } from "@/core/roles-permissions/types";
 import type { AppInstallCapability } from "../app-installs/app-install.types";
 import type { ConnectorCapability } from "../connector-connections/connector-connection.types";
 import type { LicenseCapability } from "../licenses/license.types";
+import type { NotificationChannelCapability } from "../notification-channels/notification-channel.types";
 
 // Platform's own capability vocabulary and role matrix -- entirely
 // separate from core/roles-permissions' Capability/ROLE_CAPABILITIES,
 // which are never edited for anything Platform needs. Reuses only Core's
 // Role type and requireCompanyMembership() (pure tenancy primitives, not
 // RBAC business knowledge) -- Core has zero awareness that "apps",
-// "connectors", or "licenses" are concepts. See docs/phases/PHASE_2_PLAN.md §8.
-export type PlatformCapability = AppInstallCapability | ConnectorCapability | LicenseCapability;
+// "connectors", "licenses", or "notification channels" are concepts. See
+// docs/phases/PHASE_2_PLAN.md §8. notificationChannels.manage added Phase 6.
+export type PlatformCapability = AppInstallCapability | ConnectorCapability | LicenseCapability | NotificationChannelCapability;
 
 const PLATFORM_ROLE_CAPABILITIES: Record<Role, PlatformCapability[]> = {
-  Owner: ["apps.view", "apps.install", "connectors.view", "connectors.manage", "licenses.view"],
+  Owner: ["apps.view", "apps.install", "connectors.view", "connectors.manage", "licenses.view", "notificationChannels.manage"],
   Manager: ["apps.view", "connectors.view", "licenses.view"],
   Supervisor: [],
   Employee: [],

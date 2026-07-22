@@ -71,6 +71,25 @@ export async function requireSession(): Promise<AuthSession> {
   return session;
 }
 
+// Phase 6 (Kitchen Display): bridges the existing server-side session to a
+// real client-side Firebase Auth identity, so a Client Component can use
+// the already-scaffolded, previously-unused client Firestore SDK
+// (src/lib/firebase/client.ts) for realtime onSnapshot listeners --
+// without this, every client-side Firestore request has request.auth ==
+// null and is correctly denied by the existing rules (there is no gap in
+// the rules; there was simply no client identity for them to evaluate).
+// The token carries only the current session's own uid, plus a mirrored
+// superAdmin claim (the one other claim any rule actually checks) -- role
+// and branchIds are deliberately NOT embedded here, since every rule that
+// needs them already reads the membership document directly
+// (hasBranchAccess()/isActiveMember()), the same source of truth server
+// Reads use, not a second, cacheable copy that could go stale after a
+// role change. See docs/phases/PHASE_6_PLAN.md §3.
+export async function mintClientAuthToken(): Promise<string> {
+  const session = await requireSession();
+  return adminAuth.createCustomToken(session.uid, { superAdmin: session.superAdmin });
+}
+
 // Revokes every refresh token for the user (signs them out everywhere, not
 // just this one cookie) before deleting the cookie itself.
 export async function clearSession(): Promise<void> {

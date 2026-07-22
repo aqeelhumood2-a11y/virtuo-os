@@ -42,6 +42,7 @@ export function toItem(id: string, data: DocumentData): InventoryItem {
     category: data.category,
     defaultPrice: data.defaultPrice,
     isActive: data.isActive,
+    barcode: data.barcode ?? undefined,
   };
 }
 

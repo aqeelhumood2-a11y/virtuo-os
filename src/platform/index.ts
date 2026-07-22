@@ -38,3 +38,18 @@ export type { ConnectorContract } from "./connector-connections";
 
 export { hasPlatformCapability, requirePlatformCapability } from "./shared/require-platform-capability";
 export type { PlatformCapability } from "./shared/require-platform-capability";
+
+export { getWhatsAppChannel } from "./notification-channels/whatsapp-channel.repository";
+export {
+  WhatsAppChannelNotConnectedError,
+  connectWhatsAppChannel,
+  disconnectWhatsAppChannel,
+  syncWhatsAppNotifications,
+} from "./notification-channels/whatsapp-channel.service";
+export type { ConnectWhatsAppChannelInput, WhatsAppSyncSummary } from "./notification-channels/whatsapp-channel.service";
+export type {
+  NotificationChannelAuditAction,
+  NotificationChannelCapability,
+  WhatsAppChannelConnection,
+  WhatsAppChannelStatus,
+} from "./notification-channels/notification-channel.types";

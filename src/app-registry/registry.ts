@@ -1,6 +1,9 @@
 import { restaurantManifest } from "@/apps/restaurant/manifest";
 import { retailManifest } from "@/apps/retail/manifest";
 import { loyaltyManifest } from "@/apps/loyalty/manifest";
+import { barcodeManifest } from "@/apps/barcode/manifest";
+import { kitchenDisplayManifest } from "@/apps/kitchen-display/manifest";
+import { aiAssistantManifest } from "@/apps/ai-assistant/manifest";
 
 import type { AppManifest } from "./app-manifest.types";
 
@@ -29,3 +32,6 @@ export function getAppManifest(appId: string): AppManifest | null {
 registerApp(restaurantManifest);
 registerApp(retailManifest);
 registerApp(loyaltyManifest);
+registerApp(barcodeManifest);
+registerApp(kitchenDisplayManifest);
+registerApp(aiAssistantManifest);

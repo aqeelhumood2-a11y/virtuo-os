@@ -50,6 +50,16 @@ companies/{companyId}/connectors/{connectorId}
   status (connected|disconnected|error), lastSyncAt, credentialRef?, config: {...}
   # owned by platform/connector-connections; credentials NOT stored here, see §5
 
+# --- Notification channels (Phase 6) --- implemented Phase 6, see docs/phases/PHASE_6_PLAN.md
+companies/{companyId}/notificationChannels/whatsapp
+  status, lastSyncAt, credentialRef?, config: { phoneNumberId, toPhoneNumber }
+  # owned by platform/notification-channels; same shape and credential-
+  # storage convention as connectors/{connectorId} above, though WhatsApp is
+  # NOT a Connector (it delivers Core's own notifications, not external
+  # business data) -- see PHASE_6_PLAN.md §5.
+companies/{companyId}/notificationChannels/whatsapp/cursors/{uid}
+  lastNotificationId    # internal bookkeeping only, one per company admin scanned
+
 # --- Connector sync mappings (Phase 5) --- implemented Phase 5, see docs/phases/PHASE_5_PLAN.md
 companies/{companyId}/connectors/{connectorId}/productMappings/{externalId}
   itemId (Core's own InventoryItem id), externalQuantity? (informational only, never
@@ -68,6 +78,11 @@ companies/{companyId}/connectors/{connectorId}/outboundOrderMappings/{orderId}
 # see docs/phases/PHASE_1E_PLAN.md
 companies/{companyId}/inventoryItems/{itemId}          # company-wide catalog, not branch-scoped
   sku, name, unit, category, isActive, defaultPrice, createdAt
+  barcode?                                              # Phase 6 (Barcode App) -- optional, additive.
+  # Deliberately distinct from sku: a barcode is the physical UPC/EAN
+  # symbology a scanner reads, frequently different from an item's own
+  # internal catalog code. Resolved by getItemByBarcode (single-field
+  # equality filter, no composite index needed).
 
 companies/{companyId}/stock/{stockId}                # stockId = `${branchId}_${itemId}` for O(1) lookup
   branchId, itemId, quantityOnHand, reorderPoint, updatedAt
@@ -176,9 +191,29 @@ companies/{companyId}/apps/loyalty/syncCursor/default
   # never a correctness dependency (each ledger append is independently
   # idempotency-guarded by orderId).
 
-# --- Future verticals (not yet implemented) ---
-companies/{companyId}/apps/kitchenDisplay/tickets/{ticketId}
-companies/{companyId}/apps/barcode/scanLogs/{scanId}
+# --- Kitchen Display (Phase 6.1, implemented; see docs/phases/PHASE_6_PLAN.md) ---
+companies/{companyId}/apps/kitchen-display/prepStatus/{orderId}
+  branchId, stage: "queued" | "preparing" | "ready", updatedBy
+  # A Kitchen-Display-only concept layered on top of Core's own OrderStatus
+  # (pending|completed|voided), never a replacement for it -- same pattern
+  # Restaurant's orderMeta established. The first collection ever read by a
+  # Client Component directly (client Firestore SDK onSnapshot, bridged to a
+  # real Firebase Auth identity by mintClientAuthToken) rather than only
+  # through a Server Component/Action -- see PHASE_6_PLAN.md §3.
+
+# --- Barcode (Phase 6.2, implemented; see docs/phases/PHASE_6_PLAN.md) ---
+# No collection, same "no data Core doesn't already model" precedent as
+# Retail (4.1) -- scan-to-lookup reads inventoryItems.barcode directly;
+# scan-to-sell is a plain Core Order via createOrder, same idempotency
+# mechanism Retail's own createSale reuses. A scanLogs audit trail was
+# considered and left to Backlog.
+
+# --- AI Assistant (Phase 6.4, implemented; see docs/phases/PHASE_6_PLAN.md) ---
+companies/{companyId}/apps/ai-assistant/queryLog/{logId}
+  question, answer, actorId
+  # Append-only accountability record of what was asked/answered -- never
+  # read by the LLM itself, never a correctness dependency (best-effort
+  # write, same tier as Loyalty's syncCursor).
 ```
 
 Rule: an App may create collections only under `companies/{companyId}/apps/{itsOwnAppId}/...`. It never writes to another App's namespace, and it reaches Inventory/Orders only through the Core engine's application-layer functions, never by writing to `inventoryItems`/`orders` directly.
@@ -217,3 +252,5 @@ Note this **supersedes** the originally-sketched aspirational shape (a generic `
 **Implemented (Phase 2)**, for `licenses`/`apps`/`connectors`/`users/{uid}/notifications`-adjacent `settings`: every write is `if false` (Admin-SDK-only, same policy as everywhere else). Reads differ by sensitivity tier: `licenses` (closer to billing-tier information) is gated by a **new, separate** `hasPlatformCapability(companyId, 'licenses.view')` helper — a hand-maintained mirror of Platform's own `PLATFORM_ROLE_CAPABILITIES` matrix (`platform/shared/require-platform-capability.ts`), deliberately never merged with `roleCapabilities()`/`hasCapability()` above, since Core's capability matrix must never gain an entry for a commercial concept it doesn't know exists (see `docs/phases/PHASE_2_PLAN.md` §8). `apps`/`connectors`/`settings` reads are simply `isActiveMember(companyId) || isSuperAdmin()` — the same low-sensitivity tier as `branches`, since knowing what's installed/connected/branded isn't as sensitive as audit history or plan/billing details.
 
 **Implemented (Phase 5)**, for `connectors/{connectorId}/productMappings` and `connectors/{connectorId}/outboundOrderMappings`: same low-sensitivity tier and same `isActiveMember(companyId) || isSuperAdmin()` read gate as `connectors/{connectorId}` itself; every write is `if false` (Admin-SDK-only, via `syncConnector()`). No new composite index was needed — every mapping doc is read by its own id, never queried.
+
+**Implemented (Phase 6)**: `notificationChannels/{channelId}` — same tier as `connectors/{connectorId}`; its `cursors/{uid}` subcollection is SuperAdmin-only read, same tier as Loyalty's `syncCursor`. `apps/kitchen-display/prepStatus/{orderId}` — branch-scoped read (`hasBranchAccess`), same tier as Restaurant's `orderMeta`; this is the first collection read directly by a Client Component (via the client Firestore SDK) rather than only a Server Component/Action — the rule is what enforces that read, identically for either caller, with no change needed to support it. `apps/ai-assistant/queryLog/{logId}` — company-wide `isActiveMember` tier, same as Loyalty's `members`/`ledger`. Every write above remains `if false` (Admin-SDK-only).

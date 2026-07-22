@@ -3,6 +3,9 @@ import type { ComponentType } from "react";
 import { RestaurantAppRoot } from "@/apps/restaurant/routes/RestaurantAppRoot";
 import { RetailAppRoot } from "@/apps/retail/routes/RetailAppRoot";
 import { LoyaltyAppRoot } from "@/apps/loyalty/routes/LoyaltyAppRoot";
+import { BarcodeAppRoot } from "@/apps/barcode/routes/BarcodeAppRoot";
+import { KitchenDisplayAppRoot } from "@/apps/kitchen-display/routes/KitchenDisplayAppRoot";
+import { AiAssistantAppRoot } from "@/apps/ai-assistant/routes/AiAssistantAppRoot";
 
 export type AppRootProps = { companyId: string; slug?: string[] };
 
@@ -17,4 +20,7 @@ export const APP_ROOT_COMPONENTS: Partial<Record<string, ComponentType<AppRootPr
   restaurant: RestaurantAppRoot,
   retail: RetailAppRoot,
   loyalty: LoyaltyAppRoot,
+  barcode: BarcodeAppRoot,
+  "kitchen-display": KitchenDisplayAppRoot,
+  "ai-assistant": AiAssistantAppRoot,
 };
