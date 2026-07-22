@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { applyCursor, DEFAULT_PAGE_SIZE, MAX_UNBOUNDED_LIST_SIZE } from "@/lib/firebase/pagination";
 import { writeAuditInTransaction } from "@/core/audit-logs";
 import { BranchAccessDeniedError } from "@/core/companies/errors";
 import { hasBranchAccess } from "@/core/companies/membership";
@@ -11,6 +12,7 @@ import { commitStockChangePlan, planStockChange } from "@/core/inventory-engine"
 import type { StockChangePlan } from "@/core/inventory-engine";
 import { requireCapability } from "@/core/roles-permissions";
 import type { Capability } from "@/core/roles-permissions";
+import type { Page, PageOptions } from "@/shared/types";
 
 import {
   InvalidOrderTransitionError,
@@ -450,10 +452,35 @@ export async function getOrder(companyId: string, orderId: string): Promise<Orde
   return order;
 }
 
+// Phase 7 hardening: bounded by MAX_UNBOUNDED_LIST_SIZE -- see
+// lib/firebase/pagination.ts. Orders accumulate forever for an active
+// branch, so this was a genuinely unbounded read before; existing callers
+// are unaffected in shape (still a bare array). See listOrdersPage below
+// for the cursor-paginated companion new callers should prefer.
 export async function listOrdersForBranch(companyId: string, branchId: string): Promise<Order[]> {
   await assertBranchAccess(companyId, "orders.view", branchId);
-  const snap = await ordersCollection(companyId).where("branchId", "==", branchId).get();
+  const snap = await ordersCollection(companyId).where("branchId", "==", branchId).limit(MAX_UNBOUNDED_LIST_SIZE).get();
   return snap.docs.map((doc) => toOrder(doc.id, doc.data()));
+}
+
+// Phase 7: the pagination-ready companion to listOrdersForBranch,
+// mirroring core/audit-logs' listAuditLogsPage / core/notifications'
+// listNotificationsPage exactly (newest first via the same
+// FieldValue.serverTimestamp() `createdAt` every order is already written
+// with, server-side `limit`, cursor-resumable). Requires a composite index
+// on (branchId ASC, createdAt DESC) -- see firestore.indexes.json.
+export async function listOrdersPage(companyId: string, branchId: string, opts: PageOptions = {}): Promise<Page<Order>> {
+  await assertBranchAccess(companyId, "orders.view", branchId);
+  const limit = opts.limit ?? DEFAULT_PAGE_SIZE;
+
+  const collectionRef = ordersCollection(companyId);
+  const baseQuery = collectionRef.where("branchId", "==", branchId).orderBy("createdAt", "desc").limit(limit);
+  const query = await applyCursor(collectionRef, baseQuery, opts.cursor);
+
+  const snap = await query.get();
+  const items = snap.docs.map((doc) => toOrder(doc.id, doc.data()));
+  const nextCursor = snap.docs.length === limit ? snap.docs[snap.docs.length - 1].id : null;
+  return { items, nextCursor };
 }
 
 export async function listOrderLines(companyId: string, orderId: string): Promise<OrderLine[]> {

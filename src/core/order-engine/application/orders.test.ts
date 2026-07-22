@@ -17,6 +17,9 @@ const lineUpdateMock = vi.fn();
 const lineDeleteMock = vi.fn();
 const idempotencyGetMock = vi.fn();
 const idempotencySetMock = vi.fn();
+const ordersOrderByMock = vi.fn();
+const ordersLimitMock = vi.fn();
+const ordersStartAfterMock = vi.fn();
 
 vi.mock("@/core/roles-permissions", () => ({
   requireCapability: (...args: unknown[]) => requireCapabilityMock(...args),
@@ -74,7 +77,24 @@ vi.mock("@/lib/firebase/admin", () => ({
                 };
               },
             }),
-            where: () => ({ get: ordersWhereGetMock }),
+            where: () => {
+              const ref = {
+                get: ordersWhereGetMock,
+                orderBy: (...args: unknown[]) => {
+                  ordersOrderByMock(...args);
+                  return ref;
+                },
+                limit: (...args: unknown[]) => {
+                  ordersLimitMock(...args);
+                  return ref;
+                },
+                startAfter: (...args: unknown[]) => {
+                  ordersStartAfterMock(...args);
+                  return ref;
+                },
+              };
+              return ref;
+            },
           };
         },
       }),
@@ -456,10 +476,77 @@ describe("getOrder / listOrdersForBranch / listOrderLines", () => {
     expect(result).toHaveLength(1);
   });
 
+  it("listOrdersForBranch bounds the read with MAX_UNBOUNDED_LIST_SIZE", async () => {
+    ordersWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listOrdersForBranch } = await import("./orders");
+    await listOrdersForBranch("company-1", "branch-1");
+
+    expect(ordersLimitMock).toHaveBeenCalledWith(500);
+  });
+
   it("listOrderLines throws OrderNotFoundError for a missing order", async () => {
     orderGetMock.mockResolvedValue(fakeOrderSnapshot(false));
     const { listOrderLines } = await import("./orders");
     const { OrderNotFoundError } = await import("../domain/errors");
     await expect(listOrderLines("company-1", "ghost")).rejects.toThrow(OrderNotFoundError);
+  });
+});
+
+describe("listOrdersPage", () => {
+  it("requires orders.view/branch access and orders newest-first, limited to the requested page size", async () => {
+    ordersWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listOrdersPage } = await import("./orders");
+
+    await listOrdersPage("company-1", "branch-1", { limit: 10 });
+
+    expect(requireCapabilityMock).toHaveBeenCalledWith("company-1", "orders.view");
+    expect(hasBranchAccessMock).toHaveBeenCalled();
+    expect(ordersOrderByMock).toHaveBeenCalledWith("createdAt", "desc");
+    expect(ordersLimitMock).toHaveBeenCalledWith(10);
+  });
+
+  it("defaults to a page size of 50 when no limit is given", async () => {
+    ordersWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listOrdersPage } = await import("./orders");
+
+    await listOrdersPage("company-1", "branch-1");
+
+    expect(ordersLimitMock).toHaveBeenCalledWith(50);
+  });
+
+  it("returns nextCursor as the last order's id when a full page comes back", async () => {
+    ordersWhereGetMock.mockResolvedValue(fakeQuerySnapshot([pendingOrder, pendingOrder]));
+    const { listOrdersPage } = await import("./orders");
+
+    const page = await listOrdersPage("company-1", "branch-1", { limit: 2 });
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toBe("doc-1");
+  });
+
+  it("returns nextCursor: null when fewer docs than the limit come back (last page)", async () => {
+    ordersWhereGetMock.mockResolvedValue(fakeQuerySnapshot([pendingOrder]));
+    const { listOrdersPage } = await import("./orders");
+
+    const page = await listOrdersPage("company-1", "branch-1", { limit: 10 });
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("resolves a given cursor to a document snapshot and passes it to startAfter", async () => {
+    orderGetMock.mockResolvedValue({ exists: true, id: "order-1" });
+    ordersWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listOrdersPage } = await import("./orders");
+
+    await listOrdersPage("company-1", "branch-1", { cursor: "order-1" });
+
+    expect(ordersStartAfterMock).toHaveBeenCalledWith({ exists: true, id: "order-1" });
+  });
+
+  it("denies branch access the same way listOrdersForBranch does", async () => {
+    hasBranchAccessMock.mockReturnValue(false);
+    const { listOrdersPage } = await import("./orders");
+    const { BranchAccessDeniedError } = await import("@/core/companies/errors");
+
+    await expect(listOrdersPage("company-1", "branch-1")).rejects.toThrow(BranchAccessDeniedError);
+    expect(ordersWhereGetMock).not.toHaveBeenCalled();
   });
 });

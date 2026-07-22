@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import type { DocumentData } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -26,8 +27,16 @@ function toBranch(id: string, data: DocumentData): Branch {
 // existed until Phase 3's Restaurant App needed one for its own branch
 // picker. Gated by the same branch.view capability the matrix has carried
 // since 1D -- a pure additive read, no change to any existing caller.
-export async function listBranches(companyId: string): Promise<Branch[]> {
+//
+// Phase 7: wrapped in React's cache() the same way core/auth/session.ts's
+// getSession() and core/companies/membership.ts's requireCompanyMembership()
+// already are -- several Apps (Restaurant, Retail, AI Assistant) call this
+// for the same companyId from independent Server Components within one
+// request/render pass, and the branch list itself is per-request-static
+// (nothing in a single request mutates it), so deduping the Firestore read
+// is free and carries no staleness risk beyond the request's own lifetime.
+export const listBranches = cache(async (companyId: string): Promise<Branch[]> => {
   await requireCapability(companyId, "branch.view");
   const snap = await branchesCollection(companyId).get();
   return snap.docs.map((doc) => toBranch(doc.id, doc.data()));
-}
+});

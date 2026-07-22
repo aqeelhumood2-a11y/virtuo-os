@@ -30,6 +30,10 @@ describe("identity-toolkit", () => {
   });
 
   it("signUp sends the expected request and returns the credential", async () => {
+    // Explicitly cleared so this test's real-endpoint assertion holds
+    // regardless of the ambient environment -- e.g. under `test:emulator`,
+    // firebase emulators:exec sets this var process-wide for every test.
+    vi.stubEnv("FIREBASE_AUTH_EMULATOR_HOST", "");
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, { idToken: "token-123", localId: "uid-123" }),
     );
@@ -42,8 +46,25 @@ describe("identity-toolkit", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("accounts:signUp");
     expect(url).toContain("key=test-api-key");
+    expect(url).toMatch(/^https:\/\/identitytoolkit\.googleapis\.com/);
     const body = JSON.parse(init.body);
     expect(body).toMatchObject({ email: "a@example.com", password: "password123" });
+  });
+
+  it("routes to the Auth Emulator's REST endpoint when FIREBASE_AUTH_EMULATOR_HOST is set", async () => {
+    vi.stubEnv("FIREBASE_AUTH_EMULATOR_HOST", "127.0.0.1:9099");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { idToken: "token-123", localId: "uid-123" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { signUp } = await import("./identity-toolkit");
+    await signUp("a@example.com", "password123");
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=test-api-key",
+    );
   });
 
   it("signInWithPassword throws IdentityToolkitError with the parsed Firebase code", async () => {

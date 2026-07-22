@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { MAX_UNBOUNDED_LIST_SIZE } from "@/lib/firebase/pagination";
 import { writeAuditInTransaction } from "@/core/audit-logs";
 import { requireCapability } from "@/core/roles-permissions";
 
@@ -97,9 +98,14 @@ export async function deactivateItem(companyId: string, itemId: string): Promise
   });
 }
 
+// Phase 7 hardening: bounded by MAX_UNBOUNDED_LIST_SIZE so a company that
+// has accumulated a very large catalog can no longer make this a fully
+// unbounded read -- see lib/firebase/pagination.ts. Existing callers are
+// unaffected in shape (still a bare array); this only removes the
+// unbounded-growth risk.
 export async function listItems(companyId: string): Promise<InventoryItem[]> {
   await requireCapability(companyId, "inventory.view");
-  const snap = await itemsCollection(companyId).get();
+  const snap = await itemsCollection(companyId).limit(MAX_UNBOUNDED_LIST_SIZE).get();
   return snap.docs.map((doc) => toItem(doc.id, doc.data()));
 }
 

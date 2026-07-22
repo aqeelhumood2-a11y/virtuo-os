@@ -3,12 +3,14 @@ import "server-only";
 import { FieldValue, type DocumentReference, type Transaction } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { applyCursor, DEFAULT_PAGE_SIZE, MAX_UNBOUNDED_LIST_SIZE } from "@/lib/firebase/pagination";
 import { writeAuditInTransaction } from "@/core/audit-logs";
 import { BranchAccessDeniedError } from "@/core/companies/errors";
 import { hasBranchAccess } from "@/core/companies/membership";
 import type { CompanyMembershipContext } from "@/core/companies/membership";
 import { requireCapability } from "@/core/roles-permissions";
 import type { Capability } from "@/core/roles-permissions";
+import type { Page, PageOptions } from "@/shared/types";
 
 import { ItemNotFoundError } from "../domain/errors";
 import { assertSufficientStock, computeCountDelta } from "../domain/stock-math";
@@ -46,16 +48,53 @@ export async function getStockLevel(companyId: string, branchId: string, itemId:
   return toStock(snap.id, snap.data()!);
 }
 
+// Phase 7 hardening: bounded by MAX_UNBOUNDED_LIST_SIZE -- see
+// lib/firebase/pagination.ts. Stock is one doc per (branch, item) pair, so
+// this stays naturally small in practice, but the cap removes any
+// dependence on that staying true.
 export async function listStockForBranch(companyId: string, branchId: string): Promise<Stock[]> {
   await assertBranchAccess(companyId, "inventory.view", branchId);
-  const snap = await stockCollection(companyId).where("branchId", "==", branchId).get();
+  const snap = await stockCollection(companyId).where("branchId", "==", branchId).limit(MAX_UNBOUNDED_LIST_SIZE).get();
   return snap.docs.map((doc) => toStock(doc.id, doc.data()));
 }
 
+// Phase 7 hardening: bounded by MAX_UNBOUNDED_LIST_SIZE, unlike stock
+// above this is a genuinely unbounded, ever-growing append-only ledger
+// (every receive/transfer/waste/count creates a new movement, never
+// updated or deleted) -- see listMovementsPage below for the
+// cursor-paginated companion new callers should prefer.
 export async function listMovementsForBranch(companyId: string, branchId: string): Promise<InventoryMovement[]> {
   await assertBranchAccess(companyId, "inventory.view", branchId);
-  const snap = await movementsCollection(companyId).where("branchId", "==", branchId).get();
+  const snap = await movementsCollection(companyId)
+    .where("branchId", "==", branchId)
+    .limit(MAX_UNBOUNDED_LIST_SIZE)
+    .get();
   return snap.docs.map((doc) => toMovement(doc.id, doc.data()));
+}
+
+// Phase 7: the pagination-ready companion to listMovementsForBranch,
+// mirroring core/audit-logs' listAuditLogsPage / core/notifications'
+// listNotificationsPage exactly (newest first via the same
+// FieldValue.serverTimestamp() `createdAt` every movement is already
+// written with, server-side `limit`, cursor-resumable). Requires a
+// composite index on (branchId ASC, createdAt DESC) -- see
+// firestore.indexes.json.
+export async function listMovementsPage(
+  companyId: string,
+  branchId: string,
+  opts: PageOptions = {},
+): Promise<Page<InventoryMovement>> {
+  await assertBranchAccess(companyId, "inventory.view", branchId);
+  const limit = opts.limit ?? DEFAULT_PAGE_SIZE;
+
+  const collectionRef = movementsCollection(companyId);
+  const baseQuery = collectionRef.where("branchId", "==", branchId).orderBy("createdAt", "desc").limit(limit);
+  const query = await applyCursor(collectionRef, baseQuery, opts.cursor);
+
+  const snap = await query.get();
+  const items = snap.docs.map((doc) => toMovement(doc.id, doc.data()));
+  const nextCursor = snap.docs.length === limit ? snap.docs[snap.docs.length - 1].id : null;
+  return { items, nextCursor };
 }
 
 export type ApplyStockChangeParams = {

@@ -5,6 +5,7 @@ export {
   getOrder,
   listOrderLines,
   listOrdersForBranch,
+  listOrdersPage,
   removeOrderLine,
   updateOrderLineQuantity,
   voidOrder,

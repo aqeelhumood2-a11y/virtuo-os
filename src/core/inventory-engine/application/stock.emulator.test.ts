@@ -191,4 +191,32 @@ describe.skipIf(!IS_EMULATOR)("inventory-engine stock transactions (Firestore Em
     const countMovement = movements.find((m) => m.reason === "count");
     expect(countMovement?.quantityDelta).toBe(-2);
   });
+
+  // Phase 7: proves listMovementsPage's composite index (branchId ASC,
+  // createdAt DESC -- see firestore.indexes.json) actually exists against
+  // the real emulator, and that cursor-walking two small pages visits
+  // every seeded movement exactly once, newest first.
+  it("listMovementsPage walks every movement newest-first across two cursor-linked pages", async () => {
+    const companyId = `company-${randomUUID()}`;
+    const uid = `uid-${randomUUID()}`;
+    const itemId = `item-${randomUUID()}`;
+    await seedCompanyAndItem(companyId, uid, itemId);
+    requireSessionMock.mockResolvedValue({ uid, email: null, superAdmin: false });
+
+    const { receiveStock, listMovementsPage } = await import("./stock");
+    await receiveStock(companyId, "branch-1", itemId, 1);
+    await receiveStock(companyId, "branch-1", itemId, 2);
+    await receiveStock(companyId, "branch-1", itemId, 3);
+
+    const firstPage = await listMovementsPage(companyId, "branch-1", { limit: 2 });
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await listMovementsPage(companyId, "branch-1", { limit: 2, cursor: firstPage.nextCursor! });
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+
+    const deltas = [...firstPage.items, ...secondPage.items].map((m) => m.quantityDelta).sort((a, b) => a - b);
+    expect(deltas).toEqual([1, 2, 3]);
+  });
 });
