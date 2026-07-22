@@ -88,6 +88,12 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: licenses/apps/connector
         reservedAt: "2026-01-01T00:00:00.000Z",
         pushedAt: "2026-01-01T00:00:01.000Z",
       });
+      await setDoc(doc(db, "companies", companyId, "notificationChannels", "whatsapp"), {
+        status: "connected",
+      });
+      await setDoc(doc(db, "companies", companyId, "notificationChannels", "whatsapp", "cursors", "owner-1"), {
+        lastNotificationId: "notif-1",
+      });
       await setDoc(doc(db, "companies", companyId, "settings", "branding"), {
         logoUrl: null,
         primaryColor: "#336699",
@@ -242,6 +248,60 @@ describe.skipIf(!IS_EMULATOR)("Firestore security rules: licenses/apps/connector
       await assertFails(
         updateDoc(doc(ownerDb, "companies", "company-1", "connectors", "shopify", "outboundOrderMappings", "order-1"), {
           status: "reserved",
+        }),
+      );
+    });
+  });
+
+  describe("notificationChannels/{channelId}: Phase 6 WhatsApp connection, same tier as connectors", () => {
+    it("allows any active member to read", async () => {
+      await seedCompanyWithRoster("company-1");
+      const employeeDb = testEnv.authenticatedContext("employee-1").firestore();
+
+      await assertSucceeds(getDoc(doc(employeeDb, "companies", "company-1", "notificationChannels", "whatsapp")));
+    });
+
+    it("denies a non-member", async () => {
+      await seedCompanyWithRoster("company-1");
+      const strangerDb = testEnv.authenticatedContext("stranger-1").firestore();
+
+      await assertFails(getDoc(doc(strangerDb, "companies", "company-1", "notificationChannels", "whatsapp")));
+    });
+
+    it("denies every direct client write, even for the Owner", async () => {
+      await seedCompanyWithRoster("company-1");
+      const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
+
+      await assertFails(
+        updateDoc(doc(ownerDb, "companies", "company-1", "notificationChannels", "whatsapp"), { status: "disconnected" }),
+      );
+    });
+  });
+
+  describe("notificationChannels/{channelId}/cursors/{uid}: internal sync bookkeeping, SuperAdmin-only read", () => {
+    it("denies a regular Owner read", async () => {
+      await seedCompanyWithRoster("company-1");
+      const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
+
+      await assertFails(getDoc(doc(ownerDb, "companies", "company-1", "notificationChannels", "whatsapp", "cursors", "owner-1")));
+    });
+
+    it("allows a superAdmin claim holder to read", async () => {
+      await seedCompanyWithRoster("company-1");
+      const superAdminDb = testEnv.authenticatedContext("superadmin-1", { superAdmin: true }).firestore();
+
+      await assertSucceeds(
+        getDoc(doc(superAdminDb, "companies", "company-1", "notificationChannels", "whatsapp", "cursors", "owner-1")),
+      );
+    });
+
+    it("denies every direct client write", async () => {
+      await seedCompanyWithRoster("company-1");
+      const superAdminDb = testEnv.authenticatedContext("superadmin-1", { superAdmin: true }).firestore();
+
+      await assertFails(
+        updateDoc(doc(superAdminDb, "companies", "company-1", "notificationChannels", "whatsapp", "cursors", "owner-1"), {
+          lastNotificationId: "notif-2",
         }),
       );
     });

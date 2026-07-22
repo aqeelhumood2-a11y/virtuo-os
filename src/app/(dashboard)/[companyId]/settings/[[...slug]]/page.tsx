@@ -1,9 +1,14 @@
 import { notFound } from "next/navigation";
 
 import { requireCompanyMembership } from "@/core/companies/membership";
-import { AppsManagementSection, BrandingSection, ConnectorsManagementSection } from "@/settings";
+import {
+  AppsManagementSection,
+  BrandingSection,
+  ConnectorsManagementSection,
+  NotificationChannelsManagementSection,
+} from "@/settings";
 
-const SECTIONS = ["branding", "apps", "connectors"] as const;
+const SECTIONS = ["branding", "apps", "connectors", "notification-channels"] as const;
 type Section = (typeof SECTIONS)[number];
 
 function isSection(value: string): value is Section {
@@ -29,6 +34,7 @@ export default async function SettingsRoutePage({
       {section === "branding" ? <BrandingSection companyId={companyId} /> : null}
       {section === "apps" ? <AppsManagementSection companyId={companyId} /> : null}
       {section === "connectors" ? <ConnectorsManagementSection companyId={companyId} /> : null}
+      {section === "notification-channels" ? <NotificationChannelsManagementSection companyId={companyId} /> : null}
     </main>
   );
 }

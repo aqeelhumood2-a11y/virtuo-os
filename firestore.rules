@@ -311,6 +311,34 @@ service cloud.firestore {
           allow read: if isSuperAdmin();
           allow write: if false;
         }
+
+        // --- Kitchen Display App (6.1) ------------------------------------
+        // App-owned prep-stage tracking Core's own OrderStatus deliberately
+        // does not model (queued/preparing/ready is a Kitchen-Display-only
+        // concept layered on top of Core's pending/completed/voided) -- same
+        // branch-scoped visibility tier as Restaurant's orderMeta above.
+        // This is the first collection ever read by a Client Component
+        // directly (via the client Firestore SDK's onSnapshot, bridged to a
+        // real Firebase Auth identity by mintClientAuthToken -- see
+        // docs/phases/PHASE_6_PLAN.md §3) rather than only through a Server
+        // Component/Action -- this rule is what actually enforces that read,
+        // identically for a server or client caller. Every write still goes
+        // through kitchen-display's own actions.ts (Admin SDK only).
+        match /prepStatus/{orderId} {
+          allow read: if hasBranchAccess(companyId, resource.data.branchId) || isSuperAdmin();
+          allow write: if false;
+        }
+
+        // --- AI Assistant App (6.4) ---------------------------------------
+        // Company-wide, not branch-scoped (a question isn't tied to one
+        // branch) -- same low-sensitivity visibility tier as Loyalty's own
+        // ledger/members. Append-only accountability record, never read by
+        // the LLM itself; every write goes through query-orchestrator.service.ts
+        // (Admin SDK only).
+        match /queryLog/{logId} {
+          allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
       }
 
       // Connection state only -- credentials are never stored here, only
@@ -330,6 +358,24 @@ service cloud.firestore {
         }
         match /outboundOrderMappings/{orderId} {
           allow read: if isActiveMember(companyId) || isSuperAdmin();
+          allow write: if false;
+        }
+      }
+
+      // --- Phase 6: WhatsApp notification channel ---------------------------
+      // Connection state only, same shape and visibility tier as connectors/
+      // above -- credentials are never stored here, only an opaque
+      // credentialRef. Every write goes through connectWhatsAppChannel()/
+      // disconnectWhatsAppChannel()/syncWhatsAppNotifications() (Admin SDK).
+      // See docs/phases/PHASE_6_PLAN.md §5.
+      match /notificationChannels/{channelId} {
+        allow read: if isActiveMember(companyId) || isSuperAdmin();
+        allow write: if false;
+
+        // Internal sync bookkeeping only -- never read by a client, same
+        // tier as Loyalty's own syncCursor (Phase 4.2).
+        match /cursors/{uid} {
+          allow read: if isSuperAdmin();
           allow write: if false;
         }
       }

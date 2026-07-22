@@ -13,7 +13,7 @@ import {
   toSafeAuthError,
 } from "./identity-toolkit";
 import { checkRateLimit } from "./rate-limit";
-import { clearSession, createSession } from "./session";
+import { clearSession, createSession, mintClientAuthToken } from "./session";
 import type { AuthFormState } from "./types";
 
 const CSRF_ERROR: AuthFormState = {
@@ -138,4 +138,18 @@ export async function requestPasswordResetAction(
   }
 
   return GENERIC_SUCCESS;
+}
+
+// Phase 6 (Kitchen Display): called directly from a Client Component (not
+// via a <form>), so there is no FormData/csrfToken to verify here -- this
+// mutates nothing server-side, it only mints a token from the caller's
+// own already-verified session cookie (mintClientAuthToken redirects to
+// /login itself if there's no valid session, via requireSession).
+export async function mintClientAuthTokenAction(): Promise<{ token: string } | { error: string }> {
+  try {
+    const token = await mintClientAuthToken();
+    return { token };
+  } catch {
+    return { error: "Unable to establish a realtime session. Please refresh the page." };
+  }
 }

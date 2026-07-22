@@ -1,4 +1,4 @@
-export { createItem, deactivateItem, getItem, listItems, updateItem } from "./application/items";
+export { createItem, deactivateItem, getItem, getItemByBarcode, listItems, updateItem } from "./application/items";
 export type { CreateItemInput, UpdateItemInput } from "./application/items";
 
 export {

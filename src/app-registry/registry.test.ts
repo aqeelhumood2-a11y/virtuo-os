@@ -4,8 +4,15 @@ import { getAppManifest, getRegisteredApps, registerApp } from "./registry";
 import type { AppManifest } from "./app-manifest.types";
 
 describe("app-registry registry", () => {
-  it("has exactly Restaurant (Phase 3), Retail (Phase 4.1), and Loyalty (Phase 4.2) registered", () => {
-    expect(getRegisteredApps().map((manifest) => manifest.id).sort()).toEqual(["loyalty", "restaurant", "retail"]);
+  it("has exactly Restaurant (3), Retail (4.1), Loyalty (4.2), Barcode/Kitchen Display/AI Assistant (6) registered", () => {
+    expect(getRegisteredApps().map((manifest) => manifest.id).sort()).toEqual([
+      "ai-assistant",
+      "barcode",
+      "kitchen-display",
+      "loyalty",
+      "restaurant",
+      "retail",
+    ]);
   });
 
   it("returns null for an unregistered app id", () => {

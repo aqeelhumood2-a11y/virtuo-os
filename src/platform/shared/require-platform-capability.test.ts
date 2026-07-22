@@ -27,6 +27,7 @@ describe("hasPlatformCapability", () => {
     expect(hasPlatformCapability("Owner", "apps.install")).toBe(true);
     expect(hasPlatformCapability("Owner", "connectors.manage")).toBe(true);
     expect(hasPlatformCapability("Owner", "licenses.view")).toBe(true);
+    expect(hasPlatformCapability("Owner", "notificationChannels.manage")).toBe(true);
   });
 
   it("grants Manager view-only capabilities but not apps.install/connectors.manage", async () => {
@@ -36,6 +37,7 @@ describe("hasPlatformCapability", () => {
     expect(hasPlatformCapability("Manager", "licenses.view")).toBe(true);
     expect(hasPlatformCapability("Manager", "apps.install")).toBe(false);
     expect(hasPlatformCapability("Manager", "connectors.manage")).toBe(false);
+    expect(hasPlatformCapability("Manager", "notificationChannels.manage")).toBe(false);
   });
 
   it("grants Supervisor and Employee nothing", async () => {

@@ -7,6 +7,7 @@ export {
   signInAction,
   signOutAction,
   requestPasswordResetAction,
+  mintClientAuthTokenAction,
 } from "./auth/actions";
 export { getSession, requireSession } from "./auth/session";
 export type { AuthFormState, AuthSession } from "./auth/types";
@@ -21,8 +22,17 @@ export {
   listNotificationsPage,
   markAllAsRead,
   markAsRead,
+  sendWhatsAppMessage,
+  verifyWhatsAppCredential,
+  WhatsAppSendError,
 } from "./notifications";
-export type { CreateNotificationInput, Notification, NotificationChannel, RelatedEntity } from "./notifications";
+export type {
+  CreateNotificationInput,
+  Notification,
+  NotificationChannel,
+  RelatedEntity,
+  WhatsAppChannelConfig,
+} from "./notifications";
 
 export type { Page, PageOptions } from "@/shared/types";
 
@@ -72,6 +82,7 @@ export {
   createItem,
   deactivateItem,
   getItem,
+  getItemByBarcode,
   getStockLevel,
   InsufficientStockError,
   ItemNotFoundError,

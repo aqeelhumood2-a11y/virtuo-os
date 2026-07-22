@@ -6,9 +6,15 @@ import { describe, expect, it } from "vitest";
 
 // Permanent, automated verification of the Phase 3 Restaurant plan's
 // architectural test requirement: components/ and routes/ under an App
-// call that App's own application-layer services, never Firestore
-// directly. Business logic (and the one place Firestore access is
-// allowed) lives in application/*.repository.ts and *.service.ts.
+// never import the Admin SDK (server-only, full-trust Firestore access) --
+// business logic (and the one place Admin-SDK Firestore access is allowed)
+// lives in application/*.repository.ts and *.service.ts. Phase 6's Kitchen
+// Display is a deliberate, narrow exception to "never Firestore directly":
+// its Client Component reads via the CLIENT Firestore SDK (firebase/firestore,
+// not firebase-admin), gated entirely by firestore.rules the same way any
+// other caller is -- this test's actual invariant (no Admin SDK, which
+// bypasses rules and trusts the caller completely) still holds for it, see
+// docs/phases/PHASE_6_PLAN.md §3.
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
