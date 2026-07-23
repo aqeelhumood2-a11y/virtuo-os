@@ -6,6 +6,17 @@ const serverEnvSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().min(1),
   FIREBASE_CLIENT_EMAIL: z.string().min(1),
   FIREBASE_PRIVATE_KEY: z.string().min(1),
+  // Same variable Next.js also inlines into the client bundle (hence the
+  // NEXT_PUBLIC_ prefix) -- validated here too, independently of
+  // clientEnv's own schema, so lib/firebase/admin.ts's Storage
+  // initialization depends only on the one value it actually needs, never
+  // on the five other, purely client-facing Firebase fields (API key,
+  // auth domain, messaging sender ID, app ID, measurement ID) that a
+  // server-only path has no reason to require. See the hotfix note this
+  // comment was added for: a missing client-only var must never be able
+  // to break server-side-only routes (e.g. the webhook handler) that
+  // never touch the browser at all.
+  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: z.string().min(1),
   // Optional (Phase 6, AI Assistant App): a single platform-wide LLM key,
   // not a per-company Secret-Manager-backed credential like a Connector's
   // -- one Virtuo-OS-operated subscription serves every company, since an

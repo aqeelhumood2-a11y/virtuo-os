@@ -8,6 +8,12 @@ const itemGetMock = vi.fn();
 const stockGetMock = vi.fn();
 const stockSetMock = vi.fn();
 const movementSetMock = vi.fn();
+const stockWhereGetMock = vi.fn();
+const movementsWhereGetMock = vi.fn();
+const whereOrderByMock = vi.fn();
+const whereLimitMock = vi.fn();
+const whereStartAfterMock = vi.fn();
+const movementsCursorDocGetMock = vi.fn();
 
 vi.mock("@/core/roles-permissions", () => ({
   requireCapability: (...args: unknown[]) => requireCapabilityMock(...args),
@@ -36,12 +42,36 @@ vi.mock("@/lib/firebase/admin", () => ({
     collection: () => ({
       doc: () => ({
         collection: (name: string) => ({
-          doc: () => {
+          doc: (id?: string) => {
             if (name === "inventoryItems") return { get: itemGetMock };
             if (name === "stock") return { get: stockGetMock, set: (...args: unknown[]) => stockSetMock(...args) };
-            return { id: "movement-id", set: (...args: unknown[]) => movementSetMock(...args) };
+            // "inventoryMovements": also doubles as the cursor-resolution
+            // doc() call applyCursor() makes on the same collection ref
+            // (see lib/firebase/pagination.ts) -- movementsCursorDocGetMock
+            // covers that case, id is otherwise unused (fake writes always
+            // resolve to the same fixed "movement-id").
+            return { id: id ?? "movement-id", get: movementsCursorDocGetMock, set: (...args: unknown[]) => movementSetMock(...args) };
           },
-          where: () => ({ get: vi.fn() }),
+          where: () => {
+            const isMovements = name === "inventoryMovements";
+            const getMock = isMovements ? movementsWhereGetMock : stockWhereGetMock;
+            const ref = {
+              get: getMock,
+              orderBy: (...orderByArgs: unknown[]) => {
+                whereOrderByMock(...orderByArgs);
+                return ref;
+              },
+              limit: (...limitArgs: unknown[]) => {
+                whereLimitMock(...limitArgs);
+                return ref;
+              },
+              startAfter: (...startAfterArgs: unknown[]) => {
+                whereStartAfterMock(...startAfterArgs);
+                return ref;
+              },
+            };
+            return ref;
+          },
         }),
       }),
     }),
@@ -237,5 +267,109 @@ describe("ItemNotFoundError", () => {
 
     await expect(receiveStock("company-1", "branch-1", "ghost-item", 5)).rejects.toThrow(ItemNotFoundError);
     expect(stockSetMock).not.toHaveBeenCalled();
+  });
+});
+
+function fakeQuerySnapshot(docs: Record<string, unknown>[]) {
+  return { docs: docs.map((data, index) => ({ id: `doc-${index}`, data: () => data })) };
+}
+
+describe("listStockForBranch", () => {
+  it("requires inventory.view/branch access and bounds the read with MAX_UNBOUNDED_LIST_SIZE", async () => {
+    stockWhereGetMock.mockResolvedValue(fakeQuerySnapshot([{ branchId: "branch-1", itemId: "item-1", quantityOnHand: 3 }]));
+    const { listStockForBranch } = await import("./stock");
+
+    const result = await listStockForBranch("company-1", "branch-1");
+
+    expect(requireCapabilityMock).toHaveBeenCalledWith("company-1", "inventory.view");
+    expect(whereLimitMock).toHaveBeenCalledWith(500);
+    expect(result).toHaveLength(1);
+  });
+
+  it("denies branch access", async () => {
+    hasBranchAccessMock.mockReturnValue(false);
+    const { listStockForBranch } = await import("./stock");
+    const { BranchAccessDeniedError } = await import("@/core/companies/errors");
+
+    await expect(listStockForBranch("company-1", "branch-1")).rejects.toThrow(BranchAccessDeniedError);
+    expect(stockWhereGetMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("listMovementsForBranch", () => {
+  it("requires inventory.view/branch access and bounds the read with MAX_UNBOUNDED_LIST_SIZE", async () => {
+    movementsWhereGetMock.mockResolvedValue(fakeQuerySnapshot([{ branchId: "branch-1", itemId: "item-1", type: "receive", quantityDelta: 5 }]));
+    const { listMovementsForBranch } = await import("./stock");
+
+    const result = await listMovementsForBranch("company-1", "branch-1");
+
+    expect(requireCapabilityMock).toHaveBeenCalledWith("company-1", "inventory.view");
+    expect(whereLimitMock).toHaveBeenCalledWith(500);
+    expect(result).toHaveLength(1);
+  });
+});
+
+describe("listMovementsPage", () => {
+  it("requires inventory.view/branch access and orders newest-first, limited to the requested page size", async () => {
+    movementsWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listMovementsPage } = await import("./stock");
+
+    await listMovementsPage("company-1", "branch-1", { limit: 10 });
+
+    expect(requireCapabilityMock).toHaveBeenCalledWith("company-1", "inventory.view");
+    expect(whereOrderByMock).toHaveBeenCalledWith("createdAt", "desc");
+    expect(whereLimitMock).toHaveBeenCalledWith(10);
+  });
+
+  it("defaults to a page size of 50 when no limit is given", async () => {
+    movementsWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listMovementsPage } = await import("./stock");
+
+    await listMovementsPage("company-1", "branch-1");
+
+    expect(whereLimitMock).toHaveBeenCalledWith(50);
+  });
+
+  it("returns nextCursor as the last movement's id when a full page comes back", async () => {
+    movementsWhereGetMock.mockResolvedValue(
+      fakeQuerySnapshot([
+        { branchId: "branch-1", itemId: "item-1", type: "receive", quantityDelta: 5 },
+        { branchId: "branch-1", itemId: "item-1", type: "receive", quantityDelta: 3 },
+      ]),
+    );
+    const { listMovementsPage } = await import("./stock");
+
+    const page = await listMovementsPage("company-1", "branch-1", { limit: 2 });
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toBe("doc-1");
+  });
+
+  it("returns nextCursor: null when fewer docs than the limit come back (last page)", async () => {
+    movementsWhereGetMock.mockResolvedValue(
+      fakeQuerySnapshot([{ branchId: "branch-1", itemId: "item-1", type: "receive", quantityDelta: 5 }]),
+    );
+    const { listMovementsPage } = await import("./stock");
+
+    const page = await listMovementsPage("company-1", "branch-1", { limit: 10 });
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("resolves a given cursor to a document snapshot and passes it to startAfter", async () => {
+    movementsCursorDocGetMock.mockResolvedValue({ exists: true, id: "movement-1" });
+    movementsWhereGetMock.mockResolvedValue(fakeQuerySnapshot([]));
+    const { listMovementsPage } = await import("./stock");
+
+    await listMovementsPage("company-1", "branch-1", { cursor: "movement-1" });
+
+    expect(whereStartAfterMock).toHaveBeenCalledWith({ exists: true, id: "movement-1" });
+  });
+
+  it("denies branch access before reading Firestore", async () => {
+    hasBranchAccessMock.mockReturnValue(false);
+    const { listMovementsPage } = await import("./stock");
+    const { BranchAccessDeniedError } = await import("@/core/companies/errors");
+
+    await expect(listMovementsPage("company-1", "branch-1")).rejects.toThrow(BranchAccessDeniedError);
+    expect(movementsWhereGetMock).not.toHaveBeenCalled();
   });
 });

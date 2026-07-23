@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,5 +19,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     globals: false,
+    // Phase 7: e2e/ holds Playwright specs (run via `npm run test:e2e`,
+    // a separate runner/process), not Vitest ones -- without this
+    // exclusion Vitest also tries to import them and fails, since
+    // Playwright's test() can only run under Playwright's own runner.
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });

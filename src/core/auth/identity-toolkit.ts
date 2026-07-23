@@ -2,7 +2,22 @@ import "server-only";
 
 import { clientEnv } from "@/shared/config/client-env";
 
-const IDENTITY_TOOLKIT_BASE_URL = "https://identitytoolkit.googleapis.com/v1/accounts";
+// Phase 7: reads FIREBASE_AUTH_EMULATOR_HOST directly via process.env
+// rather than through server-env.ts's schema -- deliberately, since this
+// is not application configuration at all. It's a Firebase CLI convention
+// (the same variable firebase-admin's adminAuth and the firebase client
+// SDK already both detect automatically), set exclusively and transiently
+// by `firebase emulators:exec`/`emulators:start` for local/test runs, and
+// it must never be set in a real deployment -- if it were, this would
+// misroute production sign-in traffic to a nonexistent local emulator.
+// Before this, this REST client had no emulator-awareness at all (unlike
+// every other Firebase Auth touch point in this codebase), so an e2e test
+// exercising real sign-up/sign-in would have hit real, production
+// Firebase Auth using .env.local's real API key -- discovered by Phase
+// 7's e2e harness, see docs/phases/PHASE_7_PLAN.md.
+const IDENTITY_TOOLKIT_BASE_URL = process.env.FIREBASE_AUTH_EMULATOR_HOST
+  ? `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts`
+  : "https://identitytoolkit.googleapis.com/v1/accounts";
 
 // Firebase's REST error responses put the machine-readable code in
 // `error.message`, optionally followed by " : <human detail>" -- we only

@@ -286,4 +286,39 @@ describe.skipIf(!IS_EMULATOR)("order-engine (Firestore Emulator)", () => {
     const { BranchAccessDeniedError } = await import("@/core/companies/errors");
     await expect(completeOrder(companyId, order.id)).rejects.toThrow(BranchAccessDeniedError);
   }, 20000);
+
+  // Phase 7: proves listOrdersPage's composite index (branchId ASC,
+  // createdAt DESC -- see firestore.indexes.json) actually exists against
+  // the real emulator, since a mock cannot detect a missing-index error --
+  // and that cursor-walking two small pages visits every seeded order
+  // exactly once, newest first.
+  it("listOrdersPage walks every order newest-first across two cursor-linked pages", async () => {
+    const companyId = `company-${randomUUID()}`;
+    const uid = `uid-${randomUUID()}`;
+    const itemId = `item-${randomUUID()}`;
+    await seedCompanyItemAndStock(companyId, uid, itemId, "branch-1", 10);
+    requireSessionMock.mockResolvedValue({ uid, email: null, superAdmin: false });
+
+    const { createOrder, listOrdersPage } = await import("./orders");
+    const input = {
+      branchId: "branch-1",
+      appId: "retail",
+      lines: [{ itemId, itemNameSnapshot: "Widget", quantity: 1, unitPrice: 9.99 }],
+    };
+    const created = [];
+    for (let i = 0; i < 3; i += 1) {
+      created.push(await createOrder(companyId, input));
+    }
+
+    const firstPage = await listOrdersPage(companyId, "branch-1", { limit: 2 });
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await listOrdersPage(companyId, "branch-1", { limit: 2, cursor: firstPage.nextCursor! });
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+
+    const seenIds = [...firstPage.items, ...secondPage.items].map((order) => order.id).sort();
+    expect(seenIds).toEqual(created.map((order) => order.id).sort());
+  }, 20000);
 });

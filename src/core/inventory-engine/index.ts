@@ -7,6 +7,7 @@ export {
   commitStockChangePlan,
   getStockLevel,
   listMovementsForBranch,
+  listMovementsPage,
   listStockForBranch,
   planStockChange,
   receiveStock,

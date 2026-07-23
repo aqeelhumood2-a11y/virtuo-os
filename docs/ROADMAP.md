@@ -103,14 +103,14 @@ Implementation does not begin on 1A until explicitly approved. Each subsequent s
 
 **Milestone 6 (met):** Kitchen Display, Barcode, WhatsApp, and AI Assistant are all real, working features on top of the existing Core/Platform/Connector/App architecture, with zero changes to Restaurant, Retail, or Loyalty and zero new Core capabilities (one new Platform capability, `notificationChannels.manage`).
 
-## Phase 7 — Hardening & Scale
-7.1 Full automated test coverage (unit, integration, Firestore rules tests, e2e).
-7.2 Performance pass: pagination, index tuning, caching, bundle/code-splitting audit.
-7.3 Security audit: rules review, dependency audit, pen-test pass.
-7.4 Observability: structured logging, error tracking, uptime monitoring.
-7.5 Revisit the "single app" decision from `ARCHITECTURE.md` §3 — extract to a monorepo only if a concrete App/Connector now needs independent deploys.
+## Phase 7 — Hardening & Scale (implemented; see `docs/phases/PHASE_7_PLAN.md`)
+7.1 (implemented) Test coverage: coverage tooling (`@vitest/coverage-v8`), the one real coverage gap found (`core/companies/queries.ts`) closed, and a new Playwright e2e harness (`npm run test:e2e`, wired through the same Firestore/Auth emulators as `test:emulator`) with one golden-path spec (register → onboard → land on `/account` as Owner). Building it surfaced and fixed a real, previously-latent gap: `core/auth/identity-toolkit.ts`'s REST client had no emulator-awareness at all.
+7.2 (implemented) Performance: defensive `.limit()` caps on every previously-unbounded Core read (`listItems`/`listOrdersForBranch`/`listStockForBranch`/`listMovementsForBranch`), two new cursor-paginated APIs (`listOrdersPage`/`listMovementsPage`, mirroring `listAuditLogsPage`/`listNotificationsPage`) with new composite indexes, `listBranches()` wrapped in `cache()`, and a bundle audit (no recurrence of the Phase 6 barrel-import bundling bug).
+7.3 (implemented) Security: full `firestore.rules`/`storage.rules` review (confirmed every write rule is unconditionally Admin-SDK-only, zero exceptions), `npm audit` run and findings documented (none safely fixable without a major framework version bump), manual code-review checklist. A live penetration test was not performed or claimed — recommended as a follow-up with a dedicated security engagement, not something a code-review pass can self-certify.
+7.4 (implemented) Observability: a dependency-free structured JSON logger and error reporter (`shared/observability/`), wired into Next.js's `instrumentation.ts` `onRequestError` hook and `app/global-error.tsx`; a `/api/health` liveness endpoint. No third-party error-tracking/uptime-monitoring *service* is connected (no account/credential exists to wire one in against) — the code exposes a clean extension point for when one is added.
+7.5 (deferred) Monorepo extraction — precondition not met: no App or Connector currently needs independent deploys, per the roadmap's own conditional language.
 
-**Milestone 7:** Production launch readiness sign-off.
+**Milestone 7 (met):** lint/typecheck/779+ unit tests/811 emulator tests/1 e2e test/production build all pass; security rules and dependency posture reviewed and documented; basic observability (structured logs, error reporting, health check) is real and working, with third-party service integration left as a documented, credential-gated follow-up.
 
 ---
 

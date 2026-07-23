@@ -7,6 +7,7 @@ const updateMock = vi.fn();
 const getMock = vi.fn();
 const collectionGetMock = vi.fn();
 const whereQueryGetMock = vi.fn();
+const collectionLimitMock = vi.fn();
 
 vi.mock("@/core/roles-permissions", () => ({
   requireCapability: (...args: unknown[]) => requireCapabilityMock(...args),
@@ -31,6 +32,10 @@ vi.mock("@/lib/firebase/admin", () => ({
             get: () => getMock(),
           }),
           get: () => collectionGetMock(),
+          limit: (...args: unknown[]) => {
+            collectionLimitMock(...args);
+            return { get: () => collectionGetMock() };
+          },
           where: () => ({
             limit: () => ({ get: () => whereQueryGetMock() }),
           }),
@@ -121,6 +126,14 @@ describe("listItems", () => {
     expect(result).toEqual([
       { id: "item-1", sku: "SKU-1", name: "Widget", unit: "each", category: "general", defaultPrice: 9.99, isActive: true },
     ]);
+  });
+
+  it("bounds the read with MAX_UNBOUNDED_LIST_SIZE", async () => {
+    collectionGetMock.mockResolvedValue({ docs: [] });
+    const { listItems } = await import("./items");
+
+    await listItems("company-1");
+    expect(collectionLimitMock).toHaveBeenCalledWith(500);
   });
 });
 
